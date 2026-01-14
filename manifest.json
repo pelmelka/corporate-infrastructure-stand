@@ -1,0 +1,17 @@
+{
+  "project": "Mini Corporate Infrastructure Lab",
+  "purpose": "Source files to load into a future custom GPT/project knowledge base",
+  "status": "admin/web/app minimally ready; log ready for Loki systemd finalization; monitor not created yet",
+  "files": [
+    "00_project_overview_and_roadmap.md",
+    "01_server_admin_state.md",
+    "02_server_web_state.md",
+    "03_server_app_state.md",
+    "04_server_log_state.md",
+    "05_network_state.md",
+    "06_config_files_current.md",
+    "07_tool_stack.md",
+    "08_next_steps_checklist.md",
+    "09_demo_scenarios.md"
+  ]
+}
