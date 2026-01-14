@@ -18,7 +18,7 @@
 - User: `pelmel`
 - sudo: работает
 - SSH: работает
-- Loki: установлен, проверен вручную, systemd-service еще нужно завершить
+- Loki: установлен и работает как `systemd` service
 
 ## Сеть
 
@@ -176,15 +176,15 @@ listen tcp :3100: bind: address already in use
 
 Причина: ручной Loki уже занимал порт 3100. Через `ps -ef | grep loki` был найден процесс. Он был остановлен через `kill -9`. После этого `ss -tulpn | grep :3100` не показывал слушателей.
 
-## Следующий шаг
+## Loki systemd service
 
-Создать systemd unit:
+Файл:
 
 ```text
 /etc/systemd/system/loki.service
 ```
 
-Планируемое содержимое:
+Содержимое:
 
 ```ini
 [Unit]
@@ -202,16 +202,63 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-Затем:
+После создания unit-файла выполнено:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now loki.service
-systemctl status loki.service --no-pager
-ss -tulpn | grep :3100
-curl http://localhost:3100/ready
 ```
 
-## Статус
+Проверка статуса показала:
 
-`log`: **база готова, Loki установлен и проверен вручную, осталось оформить Loki как systemd service**.
+```text
+Loaded: loaded (...; enabled; ...)
+Active: active (running)
+Main PID: loki
+```
+
+## Проверки после запуска через systemd
+
+На `log` выполнено:
+
+```bash
+ss -tulpn | grep :3100
+curl http://localhost:3100/ready
+ps -o user,group,pid,cmd -C loki
+```
+
+Подтверждено:
+
+```text
+порт 3100 слушается
+/ready -> ready
+процесс работает от пользователя loki и группы loki
+```
+
+С `admin` выполнено:
+
+```bash
+curl http://192.168.85.135:3100/ready
+```
+
+Результат:
+
+```text
+ready
+```
+
+## Текущий статус
+
+`log`: **готов как Loki logging server**.
+
+Loki 3.5.0 установлен, настроен, запущен через `loki.service`, включен в автозапуск, слушает порт `3100`, локальный `/ready` отвечает `ready`, проверка с `admin` тоже возвращает `ready`.
+
+## Следующий шаг
+
+Перейти к этапу **Promtail на web**:
+
+- установить Promtail на `web`;
+- настроить чтение `/var/log/nginx/access.log` и `/var/log/nginx/error.log`;
+- отправлять логи в Loki по адресу `http://192.168.85.135:3100/loki/api/v1/push`;
+- запустить Promtail как `systemd` service;
+- сгенерировать HTTP-запросы к `web` и убедиться, что nginx logs дошли в Loki.
