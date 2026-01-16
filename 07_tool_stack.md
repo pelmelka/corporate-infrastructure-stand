@@ -50,17 +50,32 @@
 
 ### systemd
 
-Используется для `app.service`, позже `loki.service`, Promtail, Prometheus, Grafana, Alertmanager, node_exporter.
+Используется для `app.service` и `loki.service`, позже для Promtail, Prometheus, Grafana, Alertmanager, node_exporter.
 
 ## Logging
 
 ### Loki
 
-Устанавливается на `log`. Роль: хранение логов и API для Grafana.
+Установлен на `log`.
+
+Текущее состояние:
+
+- версия: `3.5.0`;
+- binary: `/opt/loki/loki`;
+- config: `/etc/loki/config.yml`;
+- data dir: `/var/lib/loki`;
+- user/group: `loki:loki`;
+- service: `loki.service`;
+- status: `active (running)`;
+- autostart: `enabled`;
+- HTTP API: `192.168.85.135:3100`;
+- `/ready` локально и с `admin` возвращает `ready`.
+
+Роль: хранение логов и API для Grafana.
 
 ### Promtail, план
 
-Будет установлен на `web` и `app`. Роль: чтение логов, добавление labels, отправка в Loki.
+Будет установлен на `web` и `app`. Роль: чтение логов, добавление labels, отправка в Loki на `http://192.168.85.135:3100/loki/api/v1/push`. Ближайший этап — Promtail на `web` для nginx logs.
 
 ## Monitoring
 
