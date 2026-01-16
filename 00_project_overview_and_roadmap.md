@@ -46,7 +46,7 @@ Backend/application node. Сейчас Python-приложение на стан
 
 ### log
 
-Централизованный сервер логирования. На нем Loki. В финале принимает логи от Promtail с `web` и `app`, хранит их и отдает Grafana.
+Централизованный сервер логирования. На нем Loki. Loki уже установлен и запущен как `systemd` service. В финале принимает логи от Promtail с `web` и `app`, хранит их и отдает Grafana.
 
 ### monitor
 
@@ -109,7 +109,7 @@ Backend/application node. Сейчас Python-приложение на стан
 - Проверено, что процесс идет от `pelmel`.
 - Доступ с `admin` к `http://192.168.85.133:8080` и `/health` проверен.
 
-### log — база готова, Loki почти доведен
+### log — Loki завершен
 
 - Debian 13 установлен.
 - Hostname: `log`.
@@ -124,56 +124,71 @@ Backend/application node. Сейчас Python-приложение на стан
 - Loki вручную запускался от пользователя `loki`.
 - `curl http://localhost:3100/ready` возвращал `ready`.
 - Ручной процесс Loki был остановлен, порт 3100 освобожден.
-- Осталось оформить Loki как systemd service.
+- Создан `/etc/systemd/system/loki.service`.
+- Выполнен `sudo systemctl daemon-reload`.
+- Выполнен `sudo systemctl enable --now loki.service`.
+- `loki.service` находится в состоянии `active (running)`.
+- `loki.service` включен в автозапуск.
+- Порт `3100` слушается.
+- Процесс Loki работает от пользователя `loki` и группы `loki`.
+- На `log`: `curl http://localhost:3100/ready` возвращает `ready`.
+- С `admin`: `curl http://192.168.85.135:3100/ready` возвращает `ready`.
+- `http://192.168.85.135:3100` может возвращать `404 page not found`; это нормально, потому что Loki — API-сервис, а не веб-сайт.
 
 ## Оставшиеся этапы и ожидаемые итоги
 
-### Этап 1. Завершить Loki на `log`
+### Этап 1. Loki на `log` — завершено
 
 Итог: создан `loki.service`, выполнен `daemon-reload`, сервис `enabled` и `active`, порт 3100 слушается, `/ready` возвращает `ready`, процесс идет от пользователя `loki`, доступ с `admin` к `http://192.168.85.135:3100/ready` работает.
 
-### Этап 2. Promtail на `web` и `app`
+### Этап 2. Promtail на `web`
 
-Итог: Promtail установлен на `web` и `app`; nginx access/error logs уходят в Loki; app logs уходят в Loki; labels согласованы: `host`, `job`, `service`, `env`.
+Итог: Promtail установлен на `web`; nginx access/error logs уходят в Loki; labels согласованы: `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
 
-### Этап 3. Поднять `monitor`
+### Этап 3. Promtail на `app`
+
+Итог: app logs уходят в Loki; labels согласованы: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
+
+### Этап 4. Поднять `monitor`
 
 Итог: создана VM `monitor`; Debian, SSH, sudo; установлены Prometheus, Grafana, Alertmanager; сервисы active/enabled; доступны порты 3000, 9090, 9093.
 
-### Этап 4. Метрики
+### Этап 5. Метрики
 
 Итог: node_exporter установлен на `web`, `app`, `log`, возможно `monitor`; Prometheus видит targets как UP; Grafana видит Prometheus datasource; доступны CPU/RAM/disk/network/uptime метрики.
 
-### Этап 5. Интеграция `web` и `app`
+### Этап 6. Интеграция `web` и `app`
 
 Итог: Nginx на `web` проксирует `/api/*` на `app:8080`; сайт на `web` может получать данные от `app`; пользовательский поток Browser -> web -> app работает.
 
-### Этап 6. Grafana + Loki + Prometheus
+### Этап 7. Grafana + Loki + Prometheus
 
 Итог: в Grafana добавлены datasources Loki и Prometheus; видны логи `web` и `app`, метрики узлов, dashboard'ы.
 
-### Этап 7. Полировка logging
+### Этап 8. Полировка logging
 
 Итог: labels логов стабильны; app пишет полезные логи, возможно JSON; в Grafana/Loki удобно фильтровать по `host`, `job`, `service`, `level`, `endpoint`.
 
-### Этап 8. Полировка monitoring
+### Этап 9. Полировка monitoring
 
 Итог: есть dashboard'ы Infrastructure Overview, Web, App, Logs/Observability; есть базовые alerts: target down, app health fail, disk usage warning.
 
-### Этап 9. Полировка Ansible/admin
+### Этап 10. Полировка Ansible/admin
 
 Итог: inventory содержит все реальные узлы; SSH-ключи раскатаны; Ansible подключается к `web`, `app`, `log`, `monitor`; есть первые playbook'и для базовой настройки, установки nginx/app/promtail/node_exporter и рестарта сервисов.
 
-### Этап 10. Демонстрационный сценарий
+### Этап 11. Демонстрационный сценарий
 
 Итог: можно показать полный сценарий: открыть сайт, проверить backend, увидеть логи, увидеть метрики, уронить `app.service`, увидеть проблему в логах/метриках/alerts, поднять сервис обратно и подтвердить восстановление.
 
 ## Текущий прогресс
 
-Оценка текущего прогресса: **45–55% проекта**.
+Оценка текущего прогресса после завершения Loki: **50–60% проекта**.
+
+Текущий ближайший следующий шаг: **Promtail на web**.
 
 Оценка остатка:
 
-- текущий темп: 5–9 дней;
+- текущий темп: 4–8 дней;
 - ускоренный темп: 3–5 дней;
 - вдумчивая полировка и документация: 7–12 дней.
