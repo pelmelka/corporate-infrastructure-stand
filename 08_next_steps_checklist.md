@@ -1,21 +1,23 @@
 # Чек-лист следующих шагов
 
-## Завершить Loki на log
+## Loki на log — завершено
 
-- [ ] Убедиться, что ручной Loki остановлен.
-- [ ] Проверить, что порт 3100 свободен: `ss -tulpn | grep :3100`.
-- [ ] Создать `/etc/systemd/system/loki.service`.
-- [ ] Выполнить `sudo systemctl daemon-reload`.
-- [ ] Выполнить `sudo systemctl enable --now loki.service`.
-- [ ] Проверить `systemctl status loki.service --no-pager`.
-- [ ] Проверить `ss -tulpn | grep :3100`.
-- [ ] Проверить `curl http://localhost:3100/ready`.
-- [ ] Проверить с `admin`: `curl http://192.168.85.135:3100/ready`.
+- [x] Убедиться, что ручной Loki остановлен.
+- [x] Проверить, что порт 3100 свободен: `ss -tulpn | grep :3100`.
+- [x] Создать `/etc/systemd/system/loki.service`.
+- [x] Выполнить `sudo systemctl daemon-reload`.
+- [x] Выполнить `sudo systemctl enable --now loki.service`.
+- [x] Проверить `systemctl status loki.service --no-pager`.
+- [x] Проверить `ss -tulpn | grep :3100`.
+- [x] Проверить `curl http://localhost:3100/ready`.
+- [x] Проверить с `admin`: `curl http://192.168.85.135:3100/ready`.
 
-Ожидаемый итог: Loki работает как systemd service.
+Итог: Loki работает как `systemd` service, включен в автозапуск, порт `3100` слушается, `/ready` возвращает `ready` локально и с `admin`.
 
-## Promtail на web
+## Promtail на web — текущий следующий этап
 
+- [ ] Подключиться к `web`: `ssh pelmel@192.168.85.131`.
+- [ ] Проверить наличие nginx logs: `ls -l /var/log/nginx/`.
 - [ ] Скачать/установить Promtail.
 - [ ] Настроить Promtail config.
 - [ ] Читать `/var/log/nginx/access.log`.
