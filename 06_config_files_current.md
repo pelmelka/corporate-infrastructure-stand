@@ -196,7 +196,7 @@ ruler:
   alertmanager_url: http://localhost:9093
 ```
 
-## 7. Loki systemd unit, планируемый
+## 7. Loki systemd unit
 
 Файл:
 
@@ -204,7 +204,7 @@ ruler:
 log: /etc/systemd/system/loki.service
 ```
 
-Планируемое содержимое:
+Текущее содержимое:
 
 ```ini
 [Unit]
@@ -220,6 +220,32 @@ Restart=always
 
 [Install]
 WantedBy=multi-user.target
+```
+
+Команды применения:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now loki.service
+```
+
+Команды проверки:
+
+```bash
+systemctl status loki.service --no-pager
+ss -tulpn | grep :3100
+curl http://localhost:3100/ready
+ps -o user,group,pid,cmd -C loki
+```
+
+Ожидаемое/полученное состояние:
+
+```text
+loki.service active (running)
+autostart enabled
+порт 3100 LISTEN
+/ready -> ready
+процесс работает от loki:loki
 ```
 
 ## 8. Будущий Promtail config для web, концепт
