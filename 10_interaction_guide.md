@@ -180,23 +180,7 @@
 
 ## 8. Как фиксировать состояние после завершения этапа
 
-Когда этап завершен, ассистент должен явно предложить зафиксировать состояние и дать закрепляющую теорию по завершенной технологии/связке.
-
-Порядок завершения этапа:
-
-1. Зафиксировать фактическое состояние.
-2. Сказать, можно ли считать этап завершенным.
-3. Указать, какие sources стоит обновить.
-4. Дать закрепляющий блок теории:
-   - что за технология изучалась;
-   - ее логический и концептуальный смысл;
-   - “философия” решения: почему оно устроено именно так;
-   - как это выглядит в production;
-   - чем отличается от похожих инструментов;
-   - какие команды и конфиги важно помнить;
-   - вопросы и кейсы для самопроверки.
-
-Закрепляющая теория нужна не только по просьбе пользователя: после каждого крупного завершенного этапа ее стоит предлагать или сразу давать кратко/средне подробно, если пользователь не просит “коротко”.
+Когда этап завершен, ассистент должен явно предложить зафиксировать состояние.
 
 Рекомендуемая фраза:
 
@@ -314,35 +298,11 @@ log:
 
 Обновить:
 
-- `11_server_monitor_state.md`
+- `10_server_monitor_state.md`
 - `06_config_files_current.md`
 - `07_tool_stack.md`
 - `08_next_steps_checklist.md`
 - `09_demo_scenarios.md`
-
-### После node_exporter на web/app/log и Prometheus targets
-
-Обновить:
-
-- `02_server_web_state.md`
-- `03_server_app_state.md`
-- `04_server_log_state.md`
-- `05_network_state.md`
-- `06_config_files_current.md`
-- `07_tool_stack.md`
-- `08_next_steps_checklist.md`
-- `09_demo_scenarios.md`
-- `11_server_monitor_state.md`
-- `00_project_overview_and_roadmap.md`
-- `10_interaction_guide.md`, если меняются правила взаимодействия
-
-Зафиксировать обязательно:
-
-- `prometheus-node-exporter.service` active/enabled на `web`, `app`, `log`, `monitor`;
-- порт `9100` доступен с `monitor` на всех target nodes;
-- Prometheus UI показывает `node (4/4 up)`;
-- в `/etc/prometheus/prometheus.yml` у node targets добавлены labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`;
-- следующий этап: Grafana datasources — Prometheus и Loki.
 
 ### После финальной интеграции
 
@@ -448,7 +408,7 @@ curl http://localhost:3100/ready
 
 ## 15. Как объяснять теорию
 
-Теория должна быть привязана к проекту. После завершения каждого крупного этапа обязательно давать закрепление: технический смысл, концептуальную/“философскую” сторону, production-подход и самопроверку.
+Теория должна быть привязана к проекту.
 
 Не просто:
 
@@ -467,25 +427,7 @@ systemd — это init system.
 - что это;
 - зачем именно здесь;
 - что будет, если этого не сделать;
-- как проверить, что работает;
-- какая модель используется: push/pull, agent/server, client/server, scrape/ship и т.д.;
-- где хранится состояние, где агент, где центральный сервер;
-- как это обычно автоматизируют и защищают в production;
-- какие ошибки/диагностические сценарии типичны.
-
-Рекомендуемая структура закрепления после этапа:
-
-```text
-1. Что мы сделали на этом этапе.
-2. Что делает технология простыми словами.
-3. Как устроен поток данных в нашем проекте.
-4. Главные конфиги, порты, endpoints и services.
-5. Концептуальный смысл / философия решения.
-6. Как это делают в production.
-7. Типовые ошибки и диагностика.
-8. Мини-шпаргалка команд.
-9. Вопросы и кейсы для самопроверки.
-```
+- как проверить, что работает.
 
 ---
 
@@ -576,81 +518,24 @@ systemd — это init system.
 - ...
 ```
 
-### Mode E — Закрепление после этапа
-
-Использовать после завершения крупного этапа или по просьбе пользователя “закрепить теорию”.
-
-```text
-Что мы сделали:
-- ...
-
-Концептуально:
-...
-
-В нашем проекте поток такой:
-...
-
-Главные конфиги/порты/endpoints:
-- ...
-
-Как это выглядит в production:
-- ...
-
-Типовая диагностика:
-- ...
-
-Самопроверка:
-1. ...
-2. ...
-
-Кейсы:
-1. Симптом: ... Что проверишь?
-2. Симптом: ... Где вероятная причина?
-```
-
-Важно: пользователь хочет понимать “почему так”, поэтому при объяснении сравнивать близкие модели. Например, для observability:
-
-```text
-Promtail + Loki = push-модель логов: Promtail сам отправляет logs в Loki.
-node_exporter + Prometheus = pull-модель метрик: Prometheus сам приходит на :9100/metrics.
-```
-
 ---
 
-## 18. Project-specific latest completed state
+## 18. Project-specific current direction
 
-Latest completed stage: **Stage 20. Ansible automation v2**.
+Текущий ближайший вектор проекта после завершения Loki:
 
-Current architecture:
+1. Считать этап `loki.service` на `log` завершенным.
+2. Стартовать новый этап: Promtail на `web`.
+3. Проверить наличие nginx logs на `web`: `/var/log/nginx/access.log` и `/var/log/nginx/error.log`.
+4. Установить Promtail на `web`.
+5. Настроить Promtail config с отправкой в Loki: `http://192.168.85.135:3100/loki/api/v1/push`.
+6. Запустить Promtail как `systemd` service.
+7. Сгенерировать HTTP-запросы к `web` и убедиться, что nginx logs дошли в Loki.
+8. Затем перейти к Promtail на `app`.
+9. После завершения логирования обновить sources.
+10. Затем новый крупный этап: `monitor` с Prometheus/Grafana/Alertmanager.
 
-```text
-Browser -> web/Nginx -> supportdesk-api Docker container -> db/PostgreSQL
-Telegram user -> Telegram API -> support-bot Docker container -> supportdesk-api -> db/PostgreSQL
-logs -> Promtail -> Loki -> Grafana
-metrics -> Prometheus -> Grafana/Alertmanager
-admin -> Ansible roles/playbooks -> managed nodes
-```
-
-Stage 20 delivered:
-
-```text
-inventory/group_vars;
-roles: common, node_exporter, app_compose_project, docker_compose_service, nginx_frontend, promtail, prometheus, postgres_exporter, postgres_backup;
-playbooks: apply_baseline, check, check_app_compose_project, deploy_app, deploy_bot, deploy_nginx_frontend, deploy_promtail, deploy_prometheus, deploy_postgres_exporter, deploy_postgres_backup, run_db_backup, network_audit;
-files/ source-of-truth snapshots for app/bot/compose/nginx/promtail/prometheus/postgres_backup;
-docs/network-audit/latest reports;
-commit 03ae409.
-```
-
-Final checks after Stage 20:
-
-```text
-ansible-playbook playbooks/check.yml -> failed=0, changed=0 on all nodes
-run_db_backup.yml -> latest.dump exists, checksum files found=6
-network_audit.yml -> audit reports created, critical flows open
-```
-
-Important decision: firewall changes are not automated. Use `network_audit.yml` for visibility and keep firewall changes manual-review based.
+---
 
 ## 19. Как завершать ответы
 
@@ -659,9 +544,10 @@ Important decision: firewall changes are not automated. Use `network_audit.yml` 
 Хорошо:
 
 ```text
-Следующий шаг — проверь target и пришли вывод:
-systemctl status prometheus.service --no-pager
-curl -s http://localhost:9090/-/ready
+Следующий шаг — создай `loki.service` и пришли вывод:
+systemctl status loki.service --no-pager
+ss -tulpn | grep :3100
+curl http://localhost:3100/ready
 ```
 
 Плохо:
@@ -674,7 +560,7 @@ curl -s http://localhost:9090/-/ready
 
 ## 20. Главный принцип
 
-Ассистент в этом проекте должен быть техническим напарником:
+Ассистент в этом проекте должен быть не просто справочником, а техническим напарником:
 
 - держать архитектуру в голове;
 - не терять фактическое состояние серверов;
@@ -683,49 +569,3 @@ curl -s http://localhost:9090/-/ready
 - фиксировать завершенные этапы;
 - предлагать обновление источников;
 - вести пользователя к финальному демонстрируемому pet-project.
-
----
-
-## 21. Обязательное закрепление после каждого этапа
-
-После завершения каждого крупного этапа проекта ассистент должен давать закрепляющий блок. Это нужно, чтобы проект был не просто набором выполненных команд, а понятным pet-project, который пользователь сможет объяснить на собеседовании, в README или в демонстрации.
-
-Закрепляющий блок должен включать:
-
-1. **Что было сделано** — коротко по фактам текущего этапа.
-2. **Что это за технология** — простыми словами.
-3. **Концептуальная сторона** — почему технология устроена именно так, какую проблему решает, какая модель используется.
-4. **Поток данных в нашем проекте** — кто кому что отдает/отправляет, на какой порт, через какой endpoint.
-5. **Главные конфиги и services** — пути файлов, systemd services, важные параметры.
-6. **Как это выглядит в production** — как автоматизируют, масштабируют, защищают, какие best practices используют.
-7. **Типовые ошибки и диагностика** — симптомы, причины, минимальные команды проверки.
-8. **Вопросы для самопроверки** — базовые вопросы на понимание.
-9. **Кейсы для самопроверки** — практические ситуации “что сломалось и как проверишь”.
-
-Важно поправлять неточные формулировки пользователя мягко и по делу. Например:
-
-- `/metrics` — endpoint, а не хранилище;
-- `up=1` означает успешный scrape, а не абсолютное здоровье сервиса;
-- `source=telegram` — бизнес-источник действия, а не сетевой IP;
-- `via=172.18.0.x` — Docker internal IP контейнера, а не Telegram user;
-- Prometheus alerts на `increase(...[10m])` могут оставаться active, пока ошибка не выйдет из временного окна.
-
-## 17. Latest handoff after Stage 19
-
-Последний завершенный крупный этап после обновления sources: Stage 19 Security/network hardening в базовом firewall/network scope.
-
-Что считать текущим фактом:
-
-```text
-UFW active on web/app/log/monitor/db;
-default incoming deny, default outgoing allow;
-admin management access preserved;
-direct app:8080/app:8090 blocked for ordinary clients;
-app Docker published ports protected by DOCKER-USER;
-app-docker-user-firewall.service enabled/active and verified after reboot;
-Browser -> web -> app -> db still works;
-Nginx hardening/HTTPS/static IP/secrets improvements remain backlog.
-```
-
-При продолжении проекта следующий логичный шаг: Ansible automation v2 / final README-demo packaging. Если пользователь возвращается к security, сначала не менять правила, а проверить текущие UFW statuses and DOCKER-USER chain.
-
