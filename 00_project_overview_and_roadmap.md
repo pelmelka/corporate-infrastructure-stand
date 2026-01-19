@@ -16,18 +16,19 @@ Windows host / Browser / SSH client
 Proxmox VE node: 192.168.85.128:8006
         |
         +-- admin   192.168.85.129  control node / Ansible
-        +-- web     192.168.85.131  Nginx frontend
+        +-- web     192.168.85.131  Nginx frontend + Promtail
         +-- app     192.168.85.133  Python backend service
         +-- log     192.168.85.135  Loki logging server
         +-- monitor TBD             Prometheus + Grafana + Alertmanager
 ```
 
-Планируемые потоки:
+Планируемые/частично реализованные потоки:
 
 ```text
 Browser -> web:80 -> app:8080                 # пользовательский поток, позже через reverse proxy
-web/app -> Promtail -> log:3100 Loki          # централизованные логи
-web/app/log/monitor -> node_exporter -> monitor:9090 Prometheus -> Grafana:3000  # метрики
+web -> Promtail -> log:3100 Loki              # реализовано: nginx logs уже уходят в Loki
+app -> Promtail -> log:3100 Loki              # следующий этап
+web/app/log/monitor -> node_exporter -> monitor:9090 Prometheus -> Grafana:3000  # метрики, план
 ```
 
 ## Роли серверов
@@ -38,15 +39,15 @@ web/app/log/monitor -> node_exporter -> monitor:9090 Prometheus -> Grafana:3000 
 
 ### web
 
-Frontend / Nginx server. Сейчас отдает простую HTML-страницу. В финале должен отдавать осмысленный frontend и проксировать `/api/*` на `app:8080`. Будет источником nginx access/error логов и системных метрик.
+Frontend / Nginx server. Сейчас отдает простую HTML-страницу. Promtail уже установлен и отправляет nginx access/error logs в Loki. В финале должен отдавать осмысленный frontend и проксировать `/api/*` на `app:8080`. Также будет источником системных метрик.
 
 ### app
 
-Backend/application node. Сейчас Python-приложение на стандартной библиотеке, запущенное через `app.service`. В финале желательно сделать более осмысленный backend: `/`, `/health`, `/info`, `/api/time`, `/api/status`, возможно `/metrics`, структурированные логи, интеграция с `web`.
+Backend/application node. Сейчас Python-приложение на стандартной библиотеке, запущенное через `app.service`. В финале желательно сделать более осмысленный backend: `/`, `/health`, `/info`, `/api/time`, `/api/status`, возможно `/metrics`, структурированные логи, интеграция с `web`. Ближайший этап — настроить Promtail для app logs.
 
 ### log
 
-Централизованный сервер логирования. На нем Loki. Loki уже установлен и запущен как `systemd` service. В финале принимает логи от Promtail с `web` и `app`, хранит их и отдает Grafana.
+Централизованный сервер логирования. На нем Loki. Loki установлен и запущен как `systemd` service. Уже принимает nginx logs от `web`. В финале также будет принимать app logs и отдавать данные Grafana.
 
 ### monitor
 
@@ -82,7 +83,7 @@ Backend/application node. Сейчас Python-приложение на стан
 - SSH-ключ ed25519 создан.
 - Структура `~/control-node` начата.
 
-### web — минимально готов
+### web — Nginx и Promtail готовы
 
 - Debian 13 установлен.
 - Hostname: `web`.
@@ -93,6 +94,16 @@ Backend/application node. Сейчас Python-приложение на стан
 - Порт 80 слушается.
 - Создан `/var/www/html/index.html`.
 - Доступ с `admin` к `http://192.168.85.131` проверен.
+- Nginx пишет логи в `/var/log/nginx/access.log` и `/var/log/nginx/error.log`.
+- Promtail 3.5.0 установлен в `/opt/promtail/promtail`.
+- Создан пользователь `promtail`, добавлен в группу `adm`.
+- Создан `/etc/promtail/config.yml`.
+- Создан `/etc/systemd/system/promtail.service`.
+- `promtail.service` находится в состоянии `active (running)`.
+- `promtail.service` включен в автозапуск.
+- Promtail читает `/var/log/nginx/*.log`.
+- Promtail отправляет nginx logs в Loki на `http://192.168.85.135:3100/loki/api/v1/push`.
+- Loki `query_range` возвращает nginx logs по `{host="web",job="nginx"}`.
 
 ### app — минимально готов
 
@@ -109,7 +120,7 @@ Backend/application node. Сейчас Python-приложение на стан
 - Проверено, что процесс идет от `pelmel`.
 - Доступ с `admin` к `http://192.168.85.133:8080` и `/health` проверен.
 
-### log — Loki завершен
+### log — Loki завершен и принимает web logs
 
 - Debian 13 установлен.
 - Hostname: `log`.
@@ -134,6 +145,8 @@ Backend/application node. Сейчас Python-приложение на стан
 - На `log`: `curl http://localhost:3100/ready` возвращает `ready`.
 - С `admin`: `curl http://192.168.85.135:3100/ready` возвращает `ready`.
 - `http://192.168.85.135:3100` может возвращать `404 page not found`; это нормально, потому что Loki — API-сервис, а не веб-сайт.
+- Loki принимает nginx logs от `web`.
+- Проверка через `/loki/api/v1/query_range` возвращает `status=success` и строки nginx access log.
 
 ## Оставшиеся этапы и ожидаемые итоги
 
@@ -141,11 +154,11 @@ Backend/application node. Сейчас Python-приложение на стан
 
 Итог: создан `loki.service`, выполнен `daemon-reload`, сервис `enabled` и `active`, порт 3100 слушается, `/ready` возвращает `ready`, процесс идет от пользователя `loki`, доступ с `admin` к `http://192.168.85.135:3100/ready` работает.
 
-### Этап 2. Promtail на `web`
+### Этап 2. Promtail на `web` — завершено
 
-Итог: Promtail установлен на `web`; nginx access/error logs уходят в Loki; labels согласованы: `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+Итог: Promtail установлен на `web`; nginx access/error logs уходят в Loki; labels согласованы: `host=web`, `job=nginx`, `service=frontend`, `env=lab`; запрос `{host="web",job="nginx"}` через `query_range` возвращает логи.
 
-### Этап 3. Promtail на `app`
+### Этап 3. Promtail на `app` — текущий следующий этап
 
 Итог: app logs уходят в Loki; labels согласованы: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
 
@@ -183,12 +196,12 @@ Backend/application node. Сейчас Python-приложение на стан
 
 ## Текущий прогресс
 
-Оценка текущего прогресса после завершения Loki: **50–60% проекта**.
+Оценка текущего прогресса после завершения Promtail на `web`: **55–65% проекта**.
 
-Текущий ближайший следующий шаг: **Promtail на web**.
+Текущий ближайший следующий шаг: **Promtail на app**.
 
 Оценка остатка:
 
-- текущий темп: 4–8 дней;
+- текущий темп: 4–7 дней;
 - ускоренный темп: 3–5 дней;
 - вдумчивая полировка и документация: 7–12 дней.
