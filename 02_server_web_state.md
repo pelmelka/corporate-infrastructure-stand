@@ -18,6 +18,7 @@
 - sudo: работает
 - SSH: работает
 - Nginx: работает
+- Promtail: установлен и работает как `systemd` service
 
 ## SSH и sudo
 
@@ -30,7 +31,7 @@ Nginx установлен и запущен.
 Проверки:
 
 ```bash
-systemctl status nginx
+systemctl status nginx --no-pager
 ss -tulpn | grep :80
 curl http://localhost
 ```
@@ -38,6 +39,7 @@ curl http://localhost
 Состояние:
 
 - `nginx.service`: `active (running)`
+- `nginx.service`: `enabled`
 - порт `80`: слушается
 - `curl http://localhost`: возвращает пользовательский HTML
 
@@ -55,6 +57,9 @@ curl http://localhost
 root /var/www/html;
 index index.html index.htm index.nginx-debian.html;
 server_name _;
+location / {
+    try_files $uri $uri/ =404;
+}
 ```
 
 Nginx берет сайт из `/var/www/html` и первым ищет `index.html`.
@@ -85,6 +90,249 @@ Nginx берет сайт из `/var/www/html` и первым ищет `index.h
 
 Файл `/var/www/html/index.nginx-debian.html` остался, но не мешает, потому что `index.html` имеет приоритет.
 
+## Nginx logs
+
+Файлы:
+
+```text
+/var/log/nginx/access.log
+/var/log/nginx/error.log
+```
+
+Права на момент настройки:
+
+```text
+-rw-r----- 1 www-data adm ... access.log
+-rw-r----- 1 www-data adm ... error.log
+```
+
+Пользователь `promtail` добавлен в группу `adm`, поэтому может читать nginx-логи.
+
+Проверка:
+
+```bash
+sudo -u promtail test -r /var/log/nginx/access.log && echo "access.log readable"
+sudo -u promtail test -r /var/log/nginx/error.log && echo "error.log readable"
+```
+
+Результат:
+
+```text
+access.log readable
+error.log readable
+```
+
+## Promtail
+
+Promtail установлен вручную как бинарник.
+
+Версия:
+
+```bash
+/opt/promtail/promtail --version
+```
+
+Результат:
+
+```text
+promtail, version 3.5.0
+branch: k248
+revision: 4b16bc4f
+go version: go1.24.1
+platform: linux/amd64
+tags: promtail_journal_enabled
+```
+
+Пользователь:
+
+```bash
+id promtail
+```
+
+Результат:
+
+```text
+uid=988(promtail) gid=988(promtail) groups=988(promtail),4(adm)
+```
+
+Директории:
+
+```text
+/opt/promtail
+/etc/promtail
+/var/lib/promtail
+```
+
+Назначение:
+
+- `/opt/promtail` — бинарник;
+- `/etc/promtail` — конфиг;
+- `/var/lib/promtail` — positions-файл, то есть служебное состояние чтения логов.
+
+## Promtail config
+
+Файл:
+
+```text
+/etc/promtail/config.yml
+```
+
+Содержимое:
+
+```yaml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://192.168.85.135:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: nginx
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          host: web
+          job: nginx
+          service: frontend
+          env: lab
+          __path__: /var/log/nginx/*.log
+```
+
+Права:
+
+```bash
+sudo chown promtail:promtail /etc/promtail/config.yml
+sudo chmod 640 /etc/promtail/config.yml
+```
+
+## Promtail systemd service
+
+Файл:
+
+```text
+/etc/systemd/system/promtail.service
+```
+
+Содержимое:
+
+```ini
+[Unit]
+Description=Promtail Log Shipping Agent
+After=network.target
+
+[Service]
+User=promtail
+Group=promtail
+ExecStart=/opt/promtail/promtail -config.file=/etc/promtail/config.yml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Команды применения:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now promtail.service
+```
+
+Проверки:
+
+```bash
+systemctl status promtail.service --no-pager
+ss -tulpn | grep :9080
+sudo journalctl -u promtail.service -n 30 --no-pager
+systemctl is-enabled promtail.service
+systemctl is-active promtail.service
+```
+
+Подтверждено:
+
+```text
+promtail.service active (running)
+promtail.service enabled
+порт 9080 LISTEN
+Promtail начал читать /var/log/nginx/access.log
+Promtail начал читать /var/log/nginx/error.log
+```
+
+В `journalctl` были важные строки:
+
+```text
+tail routine: started path=/var/log/nginx/access.log
+tail routine: started path=/var/log/nginx/error.log
+```
+
+## Проверка доставки nginx logs в Loki
+
+Сгенерированы запросы на `web`:
+
+```bash
+curl http://localhost/
+curl http://localhost/not-found-promtail-test
+curl http://localhost/
+```
+
+Локально они появились в:
+
+```bash
+sudo tail -n 10 /var/log/nginx/access.log
+```
+
+Примеры строк:
+
+```text
+::1 - - [26/Apr/2026:20:47:00 +0300] "GET / HTTP/1.1" 200 188 "-" "curl/8.14.1"
+::1 - - [26/Apr/2026:20:47:17 +0300] "GET /not-found-promtail-test HTTP/1.1" 404 146 "-" "curl/8.14.1"
+::1 - - [26/Apr/2026:20:47:33 +0300] "GET / HTTP/1.1" 200 188 "-" "curl/8.14.1"
+```
+
+Проверка Loki через `query_range`:
+
+```bash
+START=$(date -d '15 minutes ago' +%s%N)
+END=$(date +%s%N)
+
+curl -G -s "http://192.168.85.135:3100/loki/api/v1/query_range"   --data-urlencode 'query={host="web",job="nginx"}'   --data-urlencode "start=$START"   --data-urlencode "end=$END"   --data-urlencode 'limit=10'   --data-urlencode 'direction=backward' | python3 -m json.tool
+```
+
+Результат:
+
+- Loki вернул `"status": "success"`;
+- найден stream с labels `host="web"`, `job="nginx"`, `service="frontend"`, `env="lab"`;
+- в `values` были строки `GET / HTTP/1.1` и `GET /not-found-promtail-test HTTP/1.1`.
+
+## Важное замечание про `/loki/api/v1/push`
+
+Адрес:
+
+```text
+http://192.168.85.135:3100/loki/api/v1/push
+```
+
+не является веб-страницей для браузера. Это API endpoint для POST-запросов от Promtail. При открытии в браузере может быть `HTTP ERROR 405`, и это нормально: браузер делает GET-запрос, а endpoint `/push` предназначен для отправки логов методом POST.
+
+Для проверки доступности Loki использовать:
+
+```bash
+curl http://192.168.85.135:3100/ready
+```
+
+Для чтения логов использовать:
+
+```text
+/loki/api/v1/query_range
+```
+
+а не `/loki/api/v1/query`, потому что обычные log queries должны выполняться как range query.
+
 ## Проверка с admin
 
 ```bash
@@ -95,6 +343,17 @@ curl http://192.168.85.131
 
 ## Статус
 
-`web` считается **минимально готовым web node**.
+`web` считается **готовым frontend node с отправкой nginx logs в Loki**.
 
-Осталось: более осмысленная страница, reverse proxy к `app`, Promtail, nginx logs в Loki, node_exporter, подключение к Prometheus.
+Готово:
+
+- Nginx работает;
+- HTML-страница отдается;
+- nginx access/error logs существуют;
+- Promtail установлен;
+- `promtail.service` active/enabled;
+- Promtail читает `/var/log/nginx/*.log`;
+- Promtail отправляет nginx logs в Loki на `log`;
+- Loki query_range возвращает nginx access logs с labels `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+
+Осталось: более осмысленная страница, reverse proxy к `app`, node_exporter, подключение к Prometheus.
