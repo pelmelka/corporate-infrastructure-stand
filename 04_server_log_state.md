@@ -247,18 +247,84 @@ curl http://192.168.85.135:3100/ready
 ready
 ```
 
+## Проверка приема логов от web
+
+После настройки Promtail на `web` Loki успешно принимает nginx logs.
+
+Источник логов:
+
+```text
+web: /var/log/nginx/access.log
+web: /var/log/nginx/error.log
+```
+
+Promtail на `web` отправляет данные в Loki по адресу:
+
+```text
+http://192.168.85.135:3100/loki/api/v1/push
+```
+
+Labels для nginx logs:
+
+```text
+host=web
+job=nginx
+service=frontend
+env=lab
+```
+
+Проверка labels:
+
+```bash
+curl -s "http://192.168.85.135:3100/loki/api/v1/labels"
+```
+
+Результат включал:
+
+```text
+env
+filename
+host
+job
+service
+service_name
+```
+
+Проверка логов через `query_range`:
+
+```bash
+START=$(date -d '15 minutes ago' +%s%N)
+END=$(date +%s%N)
+
+curl -G -s "http://192.168.85.135:3100/loki/api/v1/query_range"   --data-urlencode 'query={host="web",job="nginx"}'   --data-urlencode "start=$START"   --data-urlencode "end=$END"   --data-urlencode 'limit=10'   --data-urlencode 'direction=backward' | python3 -m json.tool
+```
+
+Результат:
+
+- `"status": "success"`;
+- `resultType`: `streams`;
+- найден stream с `filename="/var/log/nginx/access.log"`;
+- присутствовали строки `GET / HTTP/1.1` и `GET /not-found-promtail-test HTTP/1.1`.
+
+Важно: `/loki/api/v1/push` не является страницей для браузера. При открытии через браузер может быть `HTTP ERROR 405`, потому что endpoint принимает POST-запросы от Promtail, а браузер делает GET.
+
+Важно: для обычных log queries нужно использовать `/loki/api/v1/query_range`. Endpoint `/loki/api/v1/query` для такого запроса может вернуть ошибку `log queries are not supported as an instant query type`.
+
 ## Текущий статус
 
-`log`: **готов как Loki logging server**.
+`log`: **готов как Loki logging server и уже принимает nginx logs от web**.
 
 Loki 3.5.0 установлен, настроен, запущен через `loki.service`, включен в автозапуск, слушает порт `3100`, локальный `/ready` отвечает `ready`, проверка с `admin` тоже возвращает `ready`.
 
+Дополнительно подтверждено: после настройки Promtail на `web` Loki возвращает nginx access logs по запросу `{host="web",job="nginx"}`.
+
 ## Следующий шаг
 
-Перейти к этапу **Promtail на web**:
+Перейти к этапу **Promtail на app**:
 
-- установить Promtail на `web`;
-- настроить чтение `/var/log/nginx/access.log` и `/var/log/nginx/error.log`;
+- решить, как собирать app logs: через файл или через journald;
+- установить Promtail на `app`;
+- настроить labels `host=app`, `job=app`, `service=python-backend`, `env=lab`;
 - отправлять логи в Loki по адресу `http://192.168.85.135:3100/loki/api/v1/push`;
 - запустить Promtail как `systemd` service;
-- сгенерировать HTTP-запросы к `web` и убедиться, что nginx logs дошли в Loki.
+- сгенерировать запросы к `app` и убедиться, что app logs дошли в Loki.
