@@ -14,26 +14,40 @@
 
 Итог: Loki работает как `systemd` service, включен в автозапуск, порт `3100` слушается, `/ready` возвращает `ready` локально и с `admin`.
 
-## Promtail на web — текущий следующий этап
+## Promtail на web — завершено
 
-- [ ] Подключиться к `web`: `ssh pelmel@192.168.85.131`.
-- [ ] Проверить наличие nginx logs: `ls -l /var/log/nginx/`.
-- [ ] Скачать/установить Promtail.
-- [ ] Настроить Promtail config.
-- [ ] Читать `/var/log/nginx/access.log`.
-- [ ] Читать `/var/log/nginx/error.log`.
-- [ ] Отправлять в Loki `http://192.168.85.135:3100/loki/api/v1/push`.
-- [ ] Запустить Promtail как systemd service.
-- [ ] Сгенерировать HTTP-запросы к web.
-- [ ] Убедиться, что логи дошли в Loki.
+- [x] Подключиться к `web`: `ssh pelmel@192.168.85.131`.
+- [x] Проверить наличие nginx logs: `ls -l /var/log/nginx/`.
+- [x] Скачать/установить Promtail 3.5.0.
+- [x] Создать пользователя `promtail`.
+- [x] Добавить пользователя `promtail` в группу `adm` для чтения nginx logs.
+- [x] Создать директории `/opt/promtail`, `/etc/promtail`, `/var/lib/promtail`.
+- [x] Настроить Promtail config: `/etc/promtail/config.yml`.
+- [x] Читать `/var/log/nginx/access.log`.
+- [x] Читать `/var/log/nginx/error.log`.
+- [x] Отправлять в Loki `http://192.168.85.135:3100/loki/api/v1/push`.
+- [x] Создать `/etc/systemd/system/promtail.service`.
+- [x] Запустить Promtail как systemd service.
+- [x] Проверить `promtail.service active/enabled`.
+- [x] Проверить порт Promtail `9080`.
+- [x] Сгенерировать HTTP-запросы к web.
+- [x] Убедиться, что логи появились локально в `/var/log/nginx/access.log`.
+- [x] Убедиться, что nginx logs дошли в Loki через `query_range`.
 
-## Promtail на app
+Итог: Promtail на `web` работает, nginx logs уходят в Loki и находятся запросом `{host="web",job="nginx"}`. Labels согласованы: `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+
+## Promtail на app — текущий следующий этап
 
 - [ ] Решить, app logs через файл или journald.
-- [ ] Настроить Promtail.
+- [ ] Если через файл: изменить приложение или unit так, чтобы app писал полезные логи в файл.
+- [ ] Подключиться к `app`: `ssh pelmel@192.168.85.133`.
+- [ ] Скачать/установить Promtail 3.5.0.
+- [ ] Создать пользователя `promtail`.
+- [ ] Создать директории `/opt/promtail`, `/etc/promtail`, `/var/lib/promtail`.
+- [ ] Настроить Promtail config.
 - [ ] Добавить labels: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
 - [ ] Запустить Promtail как service.
-- [ ] Дернуть `/` и `/health`.
+- [ ] Дернуть `/`, `/health`, плохой endpoint.
 - [ ] Убедиться, что app logs появились в Loki.
 
 ## monitor
