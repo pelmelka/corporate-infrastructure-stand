@@ -42,6 +42,14 @@
 
 Установлен на `web`. Роль: статический frontend, позже reverse proxy, access/error logs.
 
+Текущее состояние:
+
+- `nginx.service`: `active (running)`;
+- порт `80`: слушается;
+- сайт отдается из `/var/www/html/index.html`;
+- access/error логи пишутся в `/var/log/nginx/`;
+- nginx logs уже отправляются в Loki через Promtail.
+
 ## Application слой
 
 ### Python
@@ -50,7 +58,7 @@
 
 ### systemd
 
-Используется для `app.service` и `loki.service`, позже для Promtail, Prometheus, Grafana, Alertmanager, node_exporter.
+Используется для `app.service`, `loki.service`, `promtail.service` на `web`; позже для Promtail на `app`, Prometheus, Grafana, Alertmanager, node_exporter.
 
 ## Logging
 
@@ -69,13 +77,50 @@
 - status: `active (running)`;
 - autostart: `enabled`;
 - HTTP API: `192.168.85.135:3100`;
-- `/ready` локально и с `admin` возвращает `ready`.
+- `/ready` локально и с `admin` возвращает `ready`;
+- принимает nginx logs от `web` через Promtail;
+- запрос `{host="web",job="nginx"}` через `/loki/api/v1/query_range` возвращает nginx access logs.
 
 Роль: хранение логов и API для Grafana.
 
-### Promtail, план
+### Promtail на web
 
-Будет установлен на `web` и `app`. Роль: чтение логов, добавление labels, отправка в Loki на `http://192.168.85.135:3100/loki/api/v1/push`. Ближайший этап — Promtail на `web` для nginx logs.
+Установлен на `web`.
+
+Текущее состояние:
+
+- версия: `3.5.0`;
+- binary: `/opt/promtail/promtail`;
+- config: `/etc/promtail/config.yml`;
+- positions: `/var/lib/promtail/positions.yaml`;
+- user/group: `promtail:promtail`;
+- дополнительная группа: `adm` для чтения `/var/log/nginx/*.log`;
+- service: `promtail.service`;
+- status: `active (running)`;
+- autostart: `enabled`;
+- служебный порт: `9080`;
+- читает: `/var/log/nginx/access.log`, `/var/log/nginx/error.log`;
+- отправляет в Loki: `http://192.168.85.135:3100/loki/api/v1/push`;
+- labels: `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+
+Роль: чтение nginx logs, добавление labels, отправка в Loki.
+
+Важно: `/loki/api/v1/push` — API endpoint для POST-запросов от Promtail, а не страница для браузера. `HTTP ERROR 405` при открытии в браузере не означает поломку.
+
+### Promtail на app, план
+
+Будет установлен на `app`. Роль: чтение app logs, добавление labels, отправка в Loki на `http://192.168.85.135:3100/loki/api/v1/push`.
+
+Планируемые labels:
+
+```text
+host=app
+job=app
+service=python-backend
+env=lab
+```
+
+Открытый вопрос: собирать app logs из файла или из journald.
 
 ## Monitoring
 
