@@ -55,6 +55,8 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 {host="web", job="nginx"}
 ```
 
+Текущее состояние: этот сценарий уже технически подтвержден через Loki API `query_range`. После генерации запросов Loki вернул nginx access logs с labels `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+
 ## Сценарий 4. App logs
 
 Цель: показать app logs.
