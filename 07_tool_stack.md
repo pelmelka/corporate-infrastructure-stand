@@ -48,7 +48,7 @@
 - порт `80`: слушается;
 - сайт отдается из `/var/www/html/index.html`;
 - access/error логи пишутся в `/var/log/nginx/`;
-- nginx logs уже отправляются в Loki через Promtail.
+- nginx logs отправляются в Loki через Promtail.
 
 ## Application слой
 
@@ -56,9 +56,24 @@
 
 Используется на `app`. Сейчас стандартная библиотека `http.server`; позже возможен Flask.
 
+Текущее состояние:
+
+- приложение находится в `/opt/app/app.py`;
+- сервис: `app.service`;
+- порт: `8080`;
+- endpoints: `/`, `/health`, остальные пути дают `404`;
+- application logs пишутся в `/var/log/app/app.log`;
+- app logs отправляются в Loki через Promtail.
+
 ### systemd
 
-Используется для `app.service`, `loki.service`, `promtail.service` на `web`; позже для Promtail на `app`, Prometheus, Grafana, Alertmanager, node_exporter.
+Используется для:
+
+- `app.service` на `app`;
+- `loki.service` на `log`;
+- `promtail.service` на `web`;
+- `promtail.service` на `app`;
+- позже для Prometheus, Grafana, Alertmanager, node_exporter.
 
 ## Logging
 
@@ -79,7 +94,9 @@
 - HTTP API: `192.168.85.135:3100`;
 - `/ready` локально и с `admin` возвращает `ready`;
 - принимает nginx logs от `web` через Promtail;
-- запрос `{host="web",job="nginx"}` через `/loki/api/v1/query_range` возвращает nginx access logs.
+- принимает app logs от `app` через Promtail;
+- запрос `{host="web",job="nginx"}` через `/loki/api/v1/query_range` возвращает nginx access logs;
+- запрос `{host="app",job="app"}` через `/loki/api/v1/query_range` возвращает app logs.
 
 Роль: хранение логов и API для Grafana.
 
@@ -105,22 +122,31 @@
 
 Роль: чтение nginx logs, добавление labels, отправка в Loki.
 
+### Promtail на app
+
+Установлен на `app`.
+
+Текущее состояние:
+
+- версия: `3.5.0`;
+- binary: `/opt/promtail/promtail`;
+- config: `/etc/promtail/config.yml`;
+- positions: `/var/lib/promtail/positions.yaml`;
+- user/group: `promtail:promtail`;
+- дополнительная группа: `adm` для чтения `/var/log/app/app.log`;
+- service: `promtail.service`;
+- status: `active (running)`;
+- autostart: `enabled`;
+- служебный порт: `9080`;
+- читает: `/var/log/app/app.log` через паттерн `/var/log/app/*.log`;
+- отправляет в Loki: `http://192.168.85.135:3100/loki/api/v1/push`;
+- labels: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
+
+Роль: чтение app logs, добавление labels, отправка в Loki.
+
 Важно: `/loki/api/v1/push` — API endpoint для POST-запросов от Promtail, а не страница для браузера. `HTTP ERROR 405` при открытии в браузере не означает поломку.
 
-### Promtail на app, план
-
-Будет установлен на `app`. Роль: чтение app logs, добавление labels, отправка в Loki на `http://192.168.85.135:3100/loki/api/v1/push`.
-
-Планируемые labels:
-
-```text
-host=app
-job=app
-service=python-backend
-env=lab
-```
-
-Открытый вопрос: собирать app logs из файла или из journald.
+Важно: обычные log queries нужно проверять через `/loki/api/v1/query_range`, а не через `/loki/api/v1/query`.
 
 ## Monitoring
 
@@ -130,7 +156,10 @@ env=lab
 
 ### Grafana, план
 
-Будет установлена на `monitor`. Роль: UI для dashboard'ов, логов и метрик.
+Будет установлена на `monitor`. Роль: UI для dashboard'ов, логов и метрик. В Grafana нужно будет подключить datasources:
+
+- Loki: `http://192.168.85.135:3100`;
+- Prometheus: `http://<monitor_ip>:9090`.
 
 ### Alertmanager, план
 
@@ -154,4 +183,5 @@ env=lab
 1. Нормальная работа: открыть сайт, дернуть backend, увидеть логи и метрики.
 2. App down: остановить `app.service`, увидеть ошибку, поднять обратно.
 3. Web logs: сгенерировать HTTP-запросы и увидеть nginx logs в Loki.
-4. Infrastructure overview: показать состояние всех узлов.
+4. App logs: сгенерировать HTTP-запросы и увидеть app logs в Loki.
+5. Infrastructure overview: показать состояние всех узлов.
