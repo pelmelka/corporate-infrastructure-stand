@@ -36,31 +36,52 @@
 
 Итог: Promtail на `web` работает, nginx logs уходят в Loki и находятся запросом `{host="web",job="nginx"}`. Labels согласованы: `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
 
-## Promtail на app — текущий следующий этап
+## Promtail на app — завершено
 
-- [ ] Решить, app logs через файл или journald.
-- [ ] Если через файл: изменить приложение или unit так, чтобы app писал полезные логи в файл.
-- [ ] Подключиться к `app`: `ssh pelmel@192.168.85.133`.
-- [ ] Скачать/установить Promtail 3.5.0.
-- [ ] Создать пользователя `promtail`.
-- [ ] Создать директории `/opt/promtail`, `/etc/promtail`, `/var/lib/promtail`.
-- [ ] Настроить Promtail config.
-- [ ] Добавить labels: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
-- [ ] Запустить Promtail как service.
-- [ ] Дернуть `/`, `/health`, плохой endpoint.
-- [ ] Убедиться, что app logs появились в Loki.
+- [x] Решить, app logs через файл или journald.
+- [x] Выбран вариант через отдельный файл логов.
+- [x] Создать `/var/log/app/app.log`.
+- [x] Настроить права: `/var/log/app` = `pelmel:adm 750`, `/var/log/app/app.log` = `pelmel:adm 640`.
+- [x] Сделать backup `/opt/app/app.py.bak-before-logging`.
+- [x] Изменить `/opt/app/app.py`, чтобы приложение писало полезные логи в `/var/log/app/app.log`.
+- [x] Перезапустить `app.service`.
+- [x] Проверить, что `app.service active/running`.
+- [x] Дернуть `/`, `/health`, плохой endpoint.
+- [x] Убедиться, что app logs появились локально в `/var/log/app/app.log`.
+- [x] Подключиться к `app`: `ssh pelmel@192.168.85.133`.
+- [x] Скачать/установить Promtail 3.5.0.
+- [x] Создать пользователя `promtail`.
+- [x] Добавить пользователя `promtail` в группу `adm`.
+- [x] Создать директории `/opt/promtail`, `/etc/promtail`, `/var/lib/promtail`.
+- [x] Проверить, что `promtail` может читать `/var/log/app/app.log`.
+- [x] Настроить Promtail config.
+- [x] Добавить labels: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
+- [x] Проверить синтаксис конфига Promtail.
+- [x] Создать `/etc/systemd/system/promtail.service`.
+- [x] Запустить Promtail как service.
+- [x] Проверить `promtail.service active/enabled`.
+- [x] Проверить порт Promtail `9080`.
+- [x] Проверить, что Promtail начал читать `/var/log/app/app.log`.
+- [x] Дернуть `/`, `/health`, плохой endpoint.
+- [x] Убедиться, что app logs дошли в Loki через `query_range`.
 
-## monitor
+Итог: Promtail на `app` работает, app logs уходят в Loki и находятся запросом `{host="app",job="app"}`. Labels согласованы: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
+
+## monitor — текущий следующий этап
 
 - [ ] Создать VM `monitor`.
 - [ ] Установить Debian 13.
+- [ ] Настроить hostname `monitor`.
+- [ ] Настроить IP-адрес в сети `192.168.85.0/24`.
 - [ ] Настроить SSH.
-- [ ] Настроить sudo.
+- [ ] Настроить sudo для пользователя `pelmel`.
 - [ ] Обновить систему.
+- [ ] Проверить сетевую связность с `admin`, `web`, `app`, `log`.
 - [ ] Установить Prometheus.
 - [ ] Установить Grafana.
 - [ ] Установить Alertmanager.
 - [ ] Проверить порты 3000, 9090, 9093.
+- [ ] Проверить сервисы `active/enabled`.
 
 ## node_exporter
 
@@ -77,6 +98,8 @@
 - [ ] Добавить Loki datasource.
 - [ ] Проверить запросы к Prometheus.
 - [ ] Проверить запросы к Loki.
+- [ ] Проверить Loki-запрос `{host="web",job="nginx"}`.
+- [ ] Проверить Loki-запрос `{host="app",job="app"}`.
 
 ## web/app integration
 
