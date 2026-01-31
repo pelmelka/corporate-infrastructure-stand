@@ -17,18 +17,20 @@ Proxmox VE node: 192.168.85.128:8006
         |
         +-- admin   192.168.85.129  control node / Ansible
         +-- web     192.168.85.131  Nginx frontend + Promtail
-        +-- app     192.168.85.133  Python backend service
+        +-- app     192.168.85.133  Python backend service + Promtail
         +-- log     192.168.85.135  Loki logging server
         +-- monitor TBD             Prometheus + Grafana + Alertmanager
 ```
 
-Планируемые/частично реализованные потоки:
+Реализованные и планируемые потоки:
 
 ```text
-Browser -> web:80 -> app:8080                 # пользовательский поток, позже через reverse proxy
-web -> Promtail -> log:3100 Loki              # реализовано: nginx logs уже уходят в Loki
-app -> Promtail -> log:3100 Loki              # следующий этап
-web/app/log/monitor -> node_exporter -> monitor:9090 Prometheus -> Grafana:3000  # метрики, план
+Browser -> web:80                              # реализовано: статический nginx frontend
+admin/browser -> app:8080                      # реализовано: Python backend отвечает на / и /health
+web -> Promtail -> log:3100 Loki               # реализовано: nginx logs уходят в Loki
+app -> Promtail -> log:3100 Loki               # реализовано: app logs уходят в Loki
+web/app/log/monitor -> node_exporter -> monitor:9090 Prometheus -> Grafana:3000  # план
+web:80 -> app:8080 через reverse proxy         # план
 ```
 
 ## Роли серверов
@@ -39,15 +41,15 @@ web/app/log/monitor -> node_exporter -> monitor:9090 Prometheus -> Grafana:3000 
 
 ### web
 
-Frontend / Nginx server. Сейчас отдает простую HTML-страницу. Promtail уже установлен и отправляет nginx access/error logs в Loki. В финале должен отдавать осмысленный frontend и проксировать `/api/*` на `app:8080`. Также будет источником системных метрик.
+Frontend / Nginx server. Сейчас отдает простую HTML-страницу. Promtail установлен и отправляет nginx access/error logs в Loki. В финале должен отдавать более осмысленный frontend и проксировать `/api/*` на `app:8080`. Также будет источником системных метрик.
 
 ### app
 
-Backend/application node. Сейчас Python-приложение на стандартной библиотеке, запущенное через `app.service`. В финале желательно сделать более осмысленный backend: `/`, `/health`, `/info`, `/api/time`, `/api/status`, возможно `/metrics`, структурированные логи, интеграция с `web`. Ближайший этап — настроить Promtail для app logs.
+Backend/application node. Сейчас Python-приложение на стандартной библиотеке запущено через `app.service`, отвечает на `/` и `/health`, пишет app logs в `/var/log/app/app.log`. Promtail установлен и отправляет app logs в Loki. В финале желательно добавить более осмысленные endpoints: `/info`, `/api/time`, `/api/status`, возможно `/metrics`, JSON logs и интеграцию с `web`.
 
 ### log
 
-Централизованный сервер логирования. На нем Loki. Loki установлен и запущен как `systemd` service. Уже принимает nginx logs от `web`. В финале также будет принимать app logs и отдавать данные Grafana.
+Централизованный сервер логирования. На нем Loki. Loki установлен и запущен как `systemd` service. Уже принимает nginx logs от `web` и app logs от `app`.
 
 ### monitor
 
@@ -105,7 +107,7 @@ Backend/application node. Сейчас Python-приложение на стан
 - Promtail отправляет nginx logs в Loki на `http://192.168.85.135:3100/loki/api/v1/push`.
 - Loki `query_range` возвращает nginx logs по `{host="web",job="nginx"}`.
 
-### app — минимально готов
+### app — backend и Promtail готовы
 
 - Debian 13 установлен.
 - Hostname: `app`.
@@ -113,14 +115,23 @@ Backend/application node. Сейчас Python-приложение на стан
 - SSH работает.
 - sudo работает.
 - Создано Python-приложение в `/opt/app/app.py`.
-- Приложение слушает 8080.
+- Приложение слушает `0.0.0.0:8080`.
 - `/` и `/health` работают.
 - Создан `app.service`.
 - `app.service` enabled + active.
-- Проверено, что процесс идет от `pelmel`.
-- Доступ с `admin` к `http://192.168.85.133:8080` и `/health` проверен.
+- Процесс идет от пользователя `pelmel`.
+- Создан `/var/log/app/app.log`.
+- Приложение пишет строки логов в `/var/log/app/app.log`.
+- Promtail 3.5.0 установлен в `/opt/promtail/promtail`.
+- Создан пользователь `promtail`, добавлен в группу `adm`.
+- Создан `/etc/promtail/config.yml`.
+- Создан `/etc/systemd/system/promtail.service`.
+- `promtail.service` active/enabled.
+- Promtail читает `/var/log/app/*.log`.
+- Promtail отправляет app logs в Loki на `http://192.168.85.135:3100/loki/api/v1/push`.
+- Loki `query_range` возвращает app logs по `{host="app",job="app"}`.
 
-### log — Loki завершен и принимает web logs
+### log — Loki завершен и принимает web/app logs
 
 - Debian 13 установлен.
 - Hostname: `log`.
@@ -132,12 +143,7 @@ Backend/application node. Сейчас Python-приложение на стан
 - Скачан Loki 3.5.0.
 - Проверен `/opt/loki/loki --version`.
 - Создан `/etc/loki/config.yml`.
-- Loki вручную запускался от пользователя `loki`.
-- `curl http://localhost:3100/ready` возвращал `ready`.
-- Ручной процесс Loki был остановлен, порт 3100 освобожден.
 - Создан `/etc/systemd/system/loki.service`.
-- Выполнен `sudo systemctl daemon-reload`.
-- Выполнен `sudo systemctl enable --now loki.service`.
 - `loki.service` находится в состоянии `active (running)`.
 - `loki.service` включен в автозапуск.
 - Порт `3100` слушается.
@@ -146,7 +152,8 @@ Backend/application node. Сейчас Python-приложение на стан
 - С `admin`: `curl http://192.168.85.135:3100/ready` возвращает `ready`.
 - `http://192.168.85.135:3100` может возвращать `404 page not found`; это нормально, потому что Loki — API-сервис, а не веб-сайт.
 - Loki принимает nginx logs от `web`.
-- Проверка через `/loki/api/v1/query_range` возвращает `status=success` и строки nginx access log.
+- Loki принимает app logs от `app`.
+- Проверка через `/loki/api/v1/query_range` возвращает `status=success` для `{host="web",job="nginx"}` и `{host="app",job="app"}`.
 
 ## Оставшиеся этапы и ожидаемые итоги
 
@@ -158,11 +165,11 @@ Backend/application node. Сейчас Python-приложение на стан
 
 Итог: Promtail установлен на `web`; nginx access/error logs уходят в Loki; labels согласованы: `host=web`, `job=nginx`, `service=frontend`, `env=lab`; запрос `{host="web",job="nginx"}` через `query_range` возвращает логи.
 
-### Этап 3. Promtail на `app` — текущий следующий этап
+### Этап 3. Promtail на `app` — завершено
 
-Итог: app logs уходят в Loki; labels согласованы: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
+Итог: app logs уходят в Loki; labels согласованы: `host=app`, `job=app`, `service=python-backend`, `env=lab`; запрос `{host="app",job="app"}` через `query_range` возвращает логи.
 
-### Этап 4. Поднять `monitor`
+### Этап 4. Поднять `monitor` — текущий следующий этап
 
 Итог: создана VM `monitor`; Debian, SSH, sudo; установлены Prometheus, Grafana, Alertmanager; сервисы active/enabled; доступны порты 3000, 9090, 9093.
 
@@ -196,9 +203,9 @@ Backend/application node. Сейчас Python-приложение на стан
 
 ## Текущий прогресс
 
-Оценка текущего прогресса после завершения Promtail на `web`: **55–65% проекта**.
+Оценка текущего прогресса после завершения Promtail на `app`: **65–75% проекта**.
 
-Текущий ближайший следующий шаг: **Promtail на app**.
+Текущий ближайший следующий шаг: **создать `monitor` и начать этап Prometheus/Grafana/Alertmanager**.
 
 Оценка остатка:
 
