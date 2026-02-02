@@ -522,18 +522,18 @@ systemd — это init system.
 
 ## 18. Project-specific current direction
 
-Текущий ближайший вектор проекта после завершения Loki:
+Текущий ближайший вектор проекта после завершения Promtail на `app`:
 
-1. Считать этап `loki.service` на `log` завершенным.
-2. Стартовать новый этап: Promtail на `web`.
-3. Проверить наличие nginx logs на `web`: `/var/log/nginx/access.log` и `/var/log/nginx/error.log`.
-4. Установить Promtail на `web`.
-5. Настроить Promtail config с отправкой в Loki: `http://192.168.85.135:3100/loki/api/v1/push`.
-6. Запустить Promtail как `systemd` service.
-7. Сгенерировать HTTP-запросы к `web` и убедиться, что nginx logs дошли в Loki.
-8. Затем перейти к Promtail на `app`.
-9. После завершения логирования обновить sources.
-10. Затем новый крупный этап: `monitor` с Prometheus/Grafana/Alertmanager.
+1. Считать этап `Promtail на app` завершенным.
+2. Зафиксированное состояние: `web` отправляет nginx logs в Loki, `app` отправляет app logs в Loki.
+3. Следующий крупный этап: создать `monitor`.
+4. На `monitor` установить и запустить Prometheus, Grafana, Alertmanager.
+5. Проверить доступность портов: Grafana `3000`, Prometheus `9090`, Alertmanager `9093`.
+6. Затем перейти к node_exporter на `web`, `app`, `log`, возможно `monitor`.
+7. Добавить targets в Prometheus и проверить, что они `UP`.
+8. Подключить Loki и Prometheus как datasources в Grafana.
+9. Проверить в Grafana/Loki запросы `{host="web",job="nginx"}` и `{host="app",job="app"}`.
+10. После завершения monitor/observability обновить sources.
 
 ---
 
