@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "admin/web/app minimally ready; log completed with Loki 3.5.0 running as enabled systemd service; Promtail on web completed and nginx logs are reaching Loki; next stage is Promtail on app; monitor not created yet",
-  "last_completed_stage": "Promtail on web",
-  "current_next_stage": "Promtail on app",
+  "status": "admin/web/app minimally ready; log completed with Loki 3.5.0 running as enabled systemd service; Promtail on web completed and nginx logs are reaching Loki; Promtail on app completed and app logs are reaching Loki; monitor not created yet",
+  "last_completed_stage": "Promtail on app",
+  "current_next_stage": "monitor / Prometheus / Grafana / Alertmanager",
   "files": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",
