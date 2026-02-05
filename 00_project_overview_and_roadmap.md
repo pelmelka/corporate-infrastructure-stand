@@ -4,7 +4,7 @@
 
 Собрать учебный pet-project в формате мини-инфраструктуры корпоративного типа на базе Proxmox VE внутри VMware. Это не набор отдельных VM, а связанный стенд с frontend, backend, централизованным логированием, мониторингом, базовой автоматизацией и демонстрационными сценариями troubleshooting.
 
-Итоговая ценность проекта: показать навыки Linux administration, DevOps-подхода, systemd, SSH, Ansible, Nginx, Python-сервисов, Loki/Promtail, Prometheus/Grafana/Alertmanager и диагностики.
+Итоговая ценность проекта: показать навыки Linux administration, DevOps-подхода, systemd, SSH, Ansible, Nginx, Python-сервисов, Loki/Promtail, Prometheus/Grafana/Alertmanager, node_exporter и диагностики.
 
 ## Итоговая архитектура
 
@@ -15,23 +15,42 @@ Windows host / Browser / SSH client
         v
 Proxmox VE node: 192.168.85.128:8006
         |
-        +-- admin   192.168.85.129  control node / Ansible
-        +-- web     192.168.85.131  Nginx frontend + Promtail
-        +-- app     192.168.85.133  Python backend service + Promtail
-        +-- log     192.168.85.135  Loki logging server
-        +-- monitor TBD             Prometheus + Grafana + Alertmanager
+        +-- admin    192.168.85.129  control node / Ansible
+        +-- web      192.168.85.131  Nginx frontend + Promtail
+        +-- app      192.168.85.133  Python backend service + Promtail
+        +-- log      192.168.85.135  Loki logging server
+        +-- monitor  192.168.85.137  Prometheus + Grafana + Alertmanager + node_exporter
 ```
 
 Реализованные и планируемые потоки:
 
 ```text
-Browser -> web:80                              # реализовано: статический nginx frontend
-admin/browser -> app:8080                      # реализовано: Python backend отвечает на / и /health
-web -> Promtail -> log:3100 Loki               # реализовано: nginx logs уходят в Loki
-app -> Promtail -> log:3100 Loki               # реализовано: app logs уходят в Loki
-web/app/log/monitor -> node_exporter -> monitor:9090 Prometheus -> Grafana:3000  # план
-web:80 -> app:8080 через reverse proxy         # план
+Browser -> web:80                                      # реализовано: статический nginx frontend
+admin/browser -> app:8080                              # реализовано: Python backend отвечает на / и /health
+web -> Promtail -> log:3100 Loki                       # реализовано: nginx logs уходят в Loki
+app -> Promtail -> log:3100 Loki                       # реализовано: app logs уходят в Loki
+monitor:9090 Prometheus -> monitor:9100 node_exporter  # реализовано: метрики monitor
+Prometheus -> Alertmanager:9093                        # реализовано: Prometheus видит Alertmanager
+Browser -> monitor:9090 Prometheus UI                  # реализовано
+Browser -> monitor:3000 Grafana UI                     # реализовано
+web/app/log -> node_exporter:9100 -> Prometheus         # текущий следующий этап
+Grafana -> Prometheus:9090                             # план: datasource
+Grafana -> Loki:3100                                   # план: datasource
+web:80 -> app:8080 через reverse proxy                 # план
 ```
+
+## Важное замечание про IP
+
+На текущем этапе все VM получают IP через DHCP VMware NAT. В lab-режиме адреса держатся стабильно, потому что VMware NAT обычно выдает адрес “липко” по MAC-адресу VM.
+
+Но для более правильной и воспроизводимой инфраструктуры позже нужно сделать одно из двух:
+
+```text
+1. DHCP reservation по MAC-адресам всех VM;
+2. статические IP внутри Debian на всех серверах.
+```
+
+Это важно, потому что в проекте уже есть зависимости от IP: Promtail отправляет данные в Loki на `192.168.85.135:3100`, Prometheus будет опрашивать targets по IP, Grafana будет подключаться к Loki/Prometheus, Ansible inventory тоже будет завязан на адреса узлов.
 
 ## Роли серверов
 
@@ -41,7 +60,7 @@ web:80 -> app:8080 через reverse proxy         # план
 
 ### web
 
-Frontend / Nginx server. Сейчас отдает простую HTML-страницу. Promtail установлен и отправляет nginx access/error logs в Loki. В финале должен отдавать более осмысленный frontend и проксировать `/api/*` на `app:8080`. Также будет источником системных метрик.
+Frontend / Nginx server. Сейчас отдает простую HTML-страницу. Promtail установлен и отправляет nginx access/error logs в Loki. В финале должен отдавать более осмысленный frontend и проксировать `/api/*` на `app:8080`. Также будет источником системных метрик через node_exporter.
 
 ### app
 
@@ -49,11 +68,11 @@ Backend/application node. Сейчас Python-приложение на стан
 
 ### log
 
-Централизованный сервер логирования. На нем Loki. Loki установлен и запущен как `systemd` service. Уже принимает nginx logs от `web` и app logs от `app`.
+Централизованный сервер логирования. На нем Loki. Loki установлен и запущен как `systemd` service. Принимает nginx logs от `web` и app logs от `app`. Позже Grafana будет подключаться к Loki как datasource.
 
 ### monitor
 
-Сервер мониторинга и визуализации. На нем будут Prometheus, Grafana, Alertmanager, возможно blackbox_exporter. В финале показывает метрики, логи, алерты и dashboard'ы.
+Сервер мониторинга, визуализации и алертов. На нем уже установлены Prometheus, Grafana, Alertmanager и node_exporter. Сейчас Prometheus собирает метрики самого `monitor`; следующий шаг — поставить node_exporter на `web`, `app`, `log` и добавить их как targets.
 
 ## Что уже сделано
 
@@ -154,12 +173,52 @@ Backend/application node. Сейчас Python-приложение на стан
 - Loki принимает nginx logs от `web`.
 - Loki принимает app logs от `app`.
 - Проверка через `/loki/api/v1/query_range` возвращает `status=success` для `{host="web",job="nginx"}` и `{host="app",job="app"}`.
+- После проблемы с автозапуском Loki после reboot добавлены `common.ring.instance_addr: 127.0.0.1` и `memberlist.advertise_addr: 127.0.0.1`; после этого `loki.service` корректно поднимается после reboot.
+
+### monitor — базовый observability stack готов
+
+- Debian 13 установлен.
+- Hostname: `monitor`.
+- IP: `192.168.85.137`.
+- SSH работает.
+- sudo работает.
+- Связность с `admin`, `web`, `app`, `log` проверена.
+- Loki доступен с `monitor`: `curl http://192.168.85.135:3100/ready -> ready`.
+- Prometheus установлен из стандартных Debian-репозиториев.
+- `prometheus.service` active/enabled.
+- Prometheus слушает порт `9090`.
+- Prometheus UI доступен: `http://192.168.85.137:9090`.
+- Grafana 13.0.1 установлена через локальный `.deb` файл.
+- `grafana-server.service` active/enabled.
+- Grafana слушает порт `3000`.
+- Grafana UI доступен: `http://192.168.85.137:3000`.
+- Alertmanager установлен как пакет `prometheus-alertmanager`.
+- `prometheus-alertmanager.service` active/enabled.
+- Alertmanager слушает порт `9093`.
+- `curl http://localhost:9093/-/ready -> OK`.
+- Prometheus уже знает Alertmanager: `localhost:9093` отображается в `/api/v1/alertmanagers`.
+- `prometheus-node-exporter.service` на `monitor` active/enabled.
+- node_exporter на `monitor` слушает порт `9100`.
+- Prometheus уже видит локальные targets `job="prometheus", instance="localhost:9090"` и `job="node", instance="localhost:9100"`.
+
+#### Особенность установки Grafana
+
+Официальные домены Grafana были недоступны из текущей сети/маршрута:
+
+```text
+apt.grafana.com/gpg.key -> HTTP 403 Access Denied
+apt.grafana.com/gpg-full.key -> HTTP 403
+ответ содержал: Sorry, the provided token is not valid
+dl.grafana.com/...deb -> HTTP 451
+```
+
+DNS, ping и TLS handshake при этом работали. Это означает, что проблема была не в Debian, curl/wget, DNS или сертификатах, а в отказе Grafana CDN выдать файлы. Практическое решение: скачать `.deb` на Windows через доступный маршрут, передать файл на `monitor` через `scp`, установить локально через `sudo apt install ./grafana_...deb`. После успешной установки следы неудачных попыток были очищены; директории `/etc/apt/keyrings` и `/etc/apt/sources.list.d` не удалялись.
 
 ## Оставшиеся этапы и ожидаемые итоги
 
 ### Этап 1. Loki на `log` — завершено
 
-Итог: создан `loki.service`, выполнен `daemon-reload`, сервис `enabled` и `active`, порт 3100 слушается, `/ready` возвращает `ready`, процесс идет от пользователя `loki`, доступ с `admin` к `http://192.168.85.135:3100/ready` работает.
+Итог: создан `loki.service`, сервис `enabled` и `active`, порт 3100 слушается, `/ready` возвращает `ready`, процесс идет от пользователя `loki`, доступ с `admin` к `http://192.168.85.135:3100/ready` работает, web/app logs доходят в Loki.
 
 ### Этап 2. Promtail на `web` — завершено
 
@@ -169,21 +228,21 @@ Backend/application node. Сейчас Python-приложение на стан
 
 Итог: app logs уходят в Loki; labels согласованы: `host=app`, `job=app`, `service=python-backend`, `env=lab`; запрос `{host="app",job="app"}` через `query_range` возвращает логи.
 
-### Этап 4. Поднять `monitor` — текущий следующий этап
+### Этап 4. Поднять `monitor` — завершено
 
-Итог: создана VM `monitor`; Debian, SSH, sudo; установлены Prometheus, Grafana, Alertmanager; сервисы active/enabled; доступны порты 3000, 9090, 9093.
+Итог: создана VM `monitor`; Debian, SSH, sudo и сеть работают; установлены Prometheus, Grafana, Alertmanager; сервисы active/enabled; доступны порты 3000, 9090, 9093; node_exporter на `monitor` работает на 9100.
 
-### Этап 5. Метрики
+### Этап 5. Метрики — текущий следующий этап
 
-Итог: node_exporter установлен на `web`, `app`, `log`, возможно `monitor`; Prometheus видит targets как UP; Grafana видит Prometheus datasource; доступны CPU/RAM/disk/network/uptime метрики.
+Итог: node_exporter должен быть установлен на `web`, `app`, `log`; Prometheus должен видеть targets как UP; Grafana должна видеть Prometheus datasource; будут доступны CPU/RAM/disk/network/uptime метрики по всем узлам.
 
-### Этап 6. Интеграция `web` и `app`
-
-Итог: Nginx на `web` проксирует `/api/*` на `app:8080`; сайт на `web` может получать данные от `app`; пользовательский поток Browser -> web -> app работает.
-
-### Этап 7. Grafana + Loki + Prometheus
+### Этап 6. Grafana + Loki + Prometheus
 
 Итог: в Grafana добавлены datasources Loki и Prometheus; видны логи `web` и `app`, метрики узлов, dashboard'ы.
+
+### Этап 7. Интеграция `web` и `app`
+
+Итог: Nginx на `web` проксирует `/api/*` на `app:8080`; сайт на `web` может получать данные от `app`; пользовательский поток Browser -> web -> app работает.
 
 ### Этап 8. Полировка logging
 
@@ -203,12 +262,12 @@ Backend/application node. Сейчас Python-приложение на стан
 
 ## Текущий прогресс
 
-Оценка текущего прогресса после завершения Promtail на `app`: **65–75% проекта**.
+Оценка текущего прогресса после завершения базового `monitor`: **75–80% проекта**.
 
-Текущий ближайший следующий шаг: **создать `monitor` и начать этап Prometheus/Grafana/Alertmanager**.
+Текущий ближайший следующий шаг: **поставить node_exporter на `web`, `app`, `log`, затем добавить targets в Prometheus**.
 
 Оценка остатка:
 
-- текущий темп: 4–7 дней;
-- ускоренный темп: 3–5 дней;
-- вдумчивая полировка и документация: 7–12 дней.
+- текущий темп: 3–6 дней;
+- ускоренный темп: 2–4 дня;
+- вдумчивая полировка и документация: 6–10 дней.
