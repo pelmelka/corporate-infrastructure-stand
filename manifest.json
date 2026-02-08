@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "admin/web/app minimally ready; log completed with Loki 3.5.0 running as enabled systemd service; Promtail on web completed and nginx logs are reaching Loki; Promtail on app completed and app logs are reaching Loki; monitor not created yet",
-  "last_completed_stage": "Promtail on app",
-  "current_next_stage": "monitor / Prometheus / Grafana / Alertmanager",
+  "status": "admin/web/app/log completed for current logging stage; monitor VM created; Prometheus, Grafana, Alertmanager active/enabled; node_exporter active on monitor",
+  "last_completed_stage": "monitor base stack: Prometheus + Grafana + Alertmanager",
+  "current_next_stage": "node_exporter on web, app, log; then add Prometheus targets",
   "files": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",
@@ -15,6 +15,7 @@
     "07_tool_stack.md",
     "08_next_steps_checklist.md",
     "09_demo_scenarios.md",
-    "10_interaction_guide.md"
+    "10_interaction_guide.md",
+    "11_server_monitor_state.md"
   ]
 }
