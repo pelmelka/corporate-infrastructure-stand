@@ -150,24 +150,111 @@
 
 ## Monitoring
 
-### Prometheus, план
+### Prometheus
 
-Будет установлен на `monitor`. Роль: сбор метрик.
+Установлен на `monitor` из стандартных Debian-репозиториев.
 
-### Grafana, план
+Текущее состояние:
 
-Будет установлена на `monitor`. Роль: UI для dashboard'ов, логов и метрик. В Grafana нужно будет подключить datasources:
+- service: `prometheus.service`;
+- status: `active (running)`;
+- autostart: `enabled`;
+- порт: `9090`;
+- UI: `http://192.168.85.137:9090`;
+- readiness: `curl http://localhost:9090/-/ready -> Prometheus Server is Ready.`;
+- API-запрос `query=up` возвращает `job="prometheus", instance="localhost:9090", value="1"`;
+- также видит локальный node_exporter на `localhost:9100`.
+
+Роль: сбор и хранение метрик. Сейчас собирает метрики самого `monitor`; следующий шаг — добавить `web`, `app`, `log` как targets после установки node_exporter.
+
+### Grafana
+
+Установлена на `monitor` как Grafana 13.0.1 через локальный `.deb` файл.
+
+Текущее состояние:
+
+- service: `grafana-server.service`;
+- status: `active (running)`;
+- autostart: `enabled`;
+- порт: `3000`;
+- UI: `http://192.168.85.137:3000`;
+- `curl -I http://localhost:3000` возвращает `HTTP/1.1 302 Found` и `Location: /login`.
+
+Роль: UI для dashboard'ов, логов и метрик. В Grafana нужно будет подключить datasources:
 
 - Loki: `http://192.168.85.135:3100`;
-- Prometheus: `http://<monitor_ip>:9090`.
+- Prometheus: `http://localhost:9090` или `http://192.168.85.137:9090`.
 
-### Alertmanager, план
+Особенность установки: официальный Grafana APT/download был недоступен из текущей сети/маршрута:
 
-Будет установлен на `monitor`. Роль: alerts.
+```text
+apt.grafana.com/gpg.key -> HTTP 403 Access Denied
+apt.grafana.com/gpg-full.key -> HTTP 403
+ответ содержал: Sorry, the provided token is not valid
+dl.grafana.com/...deb -> HTTP 451
+```
 
-### node_exporter, план
+Практическое решение: скачать `.deb` на Windows через доступный маршрут, передать на `monitor` через `scp`, установить локально через `sudo apt install ./grafana_...deb`. После установки следы неудачных попыток были очищены. Директории `/etc/apt/keyrings` и `/etc/apt/sources.list.d` не удалялись.
 
-Будет установлен на `web`, `app`, `log`, возможно `monitor`. Роль: системные метрики.
+### Alertmanager
+
+Установлен на `monitor` из стандартных Debian-репозиториев как пакет `prometheus-alertmanager`.
+
+Текущее состояние:
+
+- service: `prometheus-alertmanager.service`;
+- status: `active (running)`;
+- autostart: `enabled`;
+- порт: `9093`;
+- readiness: `curl http://localhost:9093/-/ready -> OK`;
+- Prometheus уже знает Alertmanager через `localhost:9093`.
+
+Проверка Prometheus API:
+
+```bash
+curl -s http://localhost:9090/api/v1/alertmanagers | python3 -m json.tool
+```
+
+Подтверждено:
+
+```json
+{
+    "status": "success",
+    "data": {
+        "activeAlertmanagers": [
+            {
+                "url": "http://localhost:9093/api/v2/alerts"
+            }
+        ],
+        "droppedAlertmanagers": []
+    }
+}
+```
+
+Важно: Debian-пакет Alertmanager не включает полноценный web UI. По `http://192.168.85.137:9093` открывается простая HTML-страница с пояснением и ссылками на `/metrics`, `/-/healthy`, `/-/ready`. Это нормально, API и health endpoints работают.
+
+### node_exporter
+
+На `monitor` уже установлен как пакет `prometheus-node-exporter`.
+
+Текущее состояние на `monitor`:
+
+- service: `prometheus-node-exporter.service`;
+- status: `active (running)`;
+- autostart: `enabled`;
+- порт: `9100`;
+- `/metrics` возвращает системные метрики;
+- Prometheus видит target `job="node", instance="localhost:9100"`.
+
+Следующий шаг: установить `node_exporter` на:
+
+```text
+web: 192.168.85.131
+app: 192.168.85.133
+log: 192.168.85.135
+```
+
+После этого добавить targets в `/etc/prometheus/prometheus.yml` на `monitor` и проверить, что все targets `UP`.
 
 ## Планируемые dashboard'ы
 
@@ -177,6 +264,14 @@
 - Logs / Observability
 - Loki dashboard
 - Prometheus targets dashboard
+
+## Планируемые alerts
+
+- TargetDown: один из targets Prometheus недоступен;
+- HighDiskUsage: высокий процент использования диска;
+- AppDown или AppHealthFail: backend health endpoint недоступен;
+- LokiDown: Loki `/ready` недоступен;
+- PromtailDown: Promtail не отвечает на служебном порту или нет новых логов.
 
 ## Планируемые демонстрационные сценарии
 
