@@ -1,117 +1,115 @@
 # Чек-лист следующих шагов
 
-## Loki на log — завершено
+## Завершено: logging stage
 
-- [x] Убедиться, что ручной Loki остановлен.
-- [x] Проверить, что порт 3100 свободен: `ss -tulpn | grep :3100`.
-- [x] Создать `/etc/systemd/system/loki.service`.
-- [x] Выполнить `sudo systemctl daemon-reload`.
-- [x] Выполнить `sudo systemctl enable --now loki.service`.
-- [x] Проверить `systemctl status loki.service --no-pager`.
-- [x] Проверить `ss -tulpn | grep :3100`.
-- [x] Проверить `curl http://localhost:3100/ready`.
-- [x] Проверить с `admin`: `curl http://192.168.85.135:3100/ready`.
+### Loki на log
 
-Итог: Loki работает как `systemd` service, включен в автозапуск, порт `3100` слушается, `/ready` возвращает `ready` локально и с `admin`.
+- [x] Loki 3.5.0 установлен.
+- [x] `loki.service` active/enabled.
+- [x] `/ready -> ready`.
+- [x] Loki принимает nginx logs от `web`.
+- [x] Loki принимает app logs от `app`.
+- [x] Исправлен autostart после reboot через:
+  - `common.ring.instance_addr: 127.0.0.1`;
+  - `memberlist.advertise_addr: 127.0.0.1`.
 
-## Promtail на web — завершено
+### Promtail на web
 
-- [x] Подключиться к `web`: `ssh pelmel@192.168.85.131`.
-- [x] Проверить наличие nginx logs: `ls -l /var/log/nginx/`.
-- [x] Скачать/установить Promtail 3.5.0.
-- [x] Создать пользователя `promtail`.
-- [x] Добавить пользователя `promtail` в группу `adm` для чтения nginx logs.
-- [x] Создать директории `/opt/promtail`, `/etc/promtail`, `/var/lib/promtail`.
-- [x] Настроить Promtail config: `/etc/promtail/config.yml`.
-- [x] Читать `/var/log/nginx/access.log`.
-- [x] Читать `/var/log/nginx/error.log`.
-- [x] Отправлять в Loki `http://192.168.85.135:3100/loki/api/v1/push`.
-- [x] Создать `/etc/systemd/system/promtail.service`.
-- [x] Запустить Promtail как systemd service.
-- [x] Проверить `promtail.service active/enabled`.
-- [x] Проверить порт Promtail `9080`.
-- [x] Сгенерировать HTTP-запросы к web.
-- [x] Убедиться, что логи появились локально в `/var/log/nginx/access.log`.
-- [x] Убедиться, что nginx logs дошли в Loki через `query_range`.
+- [x] Promtail 3.5.0 установлен.
+- [x] `promtail.service` active/enabled.
+- [x] Promtail читает `/var/log/nginx/*.log`.
+- [x] Promtail отправляет nginx logs в Loki.
+- [x] Loki query_range возвращает `{host="web",job="nginx"}`.
 
-Итог: Promtail на `web` работает, nginx logs уходят в Loki и находятся запросом `{host="web",job="nginx"}`. Labels согласованы: `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+### Promtail на app
 
-## Promtail на app — завершено
+- [x] Приложение пишет logs в `/var/log/app/app.log`.
+- [x] Promtail 3.5.0 установлен.
+- [x] `promtail.service` active/enabled.
+- [x] Promtail читает `/var/log/app/*.log`.
+- [x] Promtail отправляет app logs в Loki.
+- [x] Loki query_range возвращает `{host="app",job="app"}`.
 
-- [x] Решить, app logs через файл или journald.
-- [x] Выбран вариант через отдельный файл логов.
-- [x] Создать `/var/log/app/app.log`.
-- [x] Настроить права: `/var/log/app` = `pelmel:adm 750`, `/var/log/app/app.log` = `pelmel:adm 640`.
-- [x] Сделать backup `/opt/app/app.py.bak-before-logging`.
-- [x] Изменить `/opt/app/app.py`, чтобы приложение писало полезные логи в `/var/log/app/app.log`.
-- [x] Перезапустить `app.service`.
-- [x] Проверить, что `app.service active/running`.
-- [x] Дернуть `/`, `/health`, плохой endpoint.
-- [x] Убедиться, что app logs появились локально в `/var/log/app/app.log`.
-- [x] Подключиться к `app`: `ssh pelmel@192.168.85.133`.
-- [x] Скачать/установить Promtail 3.5.0.
-- [x] Создать пользователя `promtail`.
-- [x] Добавить пользователя `promtail` в группу `adm`.
-- [x] Создать директории `/opt/promtail`, `/etc/promtail`, `/var/lib/promtail`.
-- [x] Проверить, что `promtail` может читать `/var/log/app/app.log`.
-- [x] Настроить Promtail config.
-- [x] Добавить labels: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
-- [x] Проверить синтаксис конфига Promtail.
-- [x] Создать `/etc/systemd/system/promtail.service`.
-- [x] Запустить Promtail как service.
-- [x] Проверить `promtail.service active/enabled`.
-- [x] Проверить порт Promtail `9080`.
-- [x] Проверить, что Promtail начал читать `/var/log/app/app.log`.
-- [x] Дернуть `/`, `/health`, плохой endpoint.
-- [x] Убедиться, что app logs дошли в Loki через `query_range`.
+## Завершено: monitor base stack
 
-Итог: Promtail на `app` работает, app logs уходят в Loki и находятся запросом `{host="app",job="app"}`. Labels согласованы: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
+- [x] Создать VM `monitor`.
+- [x] Установить Debian 13.
+- [x] Настроить hostname `monitor`.
+- [x] Получить IP `192.168.85.137/24`.
+- [x] Настроить SSH.
+- [x] Настроить sudo для `pelmel`.
+- [x] Поставить базовые админские пакеты.
+- [x] Проверить связность с `admin`, `web`, `app`, `log`.
+- [x] Проверить доступ к Loki с `monitor`.
+- [x] Установить Prometheus.
+- [x] Проверить `prometheus.service active/enabled`.
+- [x] Проверить порт `9090`.
+- [x] Проверить `curl http://localhost:9090/-/ready`.
+- [x] Проверить Prometheus UI с Windows.
+- [x] Проверить Prometheus API query `up`.
+- [x] Установить Grafana через локальный `.deb`.
+- [x] Проверить `grafana-server active/enabled`.
+- [x] Проверить порт `3000`.
+- [x] Проверить Grafana UI с Windows.
+- [x] Почистить временные файлы/ключи/неудачный Grafana repo.
+- [x] Установить Alertmanager.
+- [x] Проверить `prometheus-alertmanager active/enabled`.
+- [x] Проверить порт `9093`.
+- [x] Проверить `curl http://localhost:9093/-/ready -> OK`.
+- [x] Проверить, что Prometheus видит Alertmanager через `/api/v1/alertmanagers`.
+- [x] Проверить локальный `node_exporter` на `monitor`.
+- [x] Проверить порт `9100` на `monitor`.
+- [x] Проверить `curl -s http://localhost:9100/metrics | head`.
 
-## monitor — текущий следующий этап
+Итог: `monitor` работает как базовый observability node: Prometheus, Grafana, Alertmanager и локальный node_exporter активны и включены в автозапуск.
 
-- [ ] Создать VM `monitor`.
-- [ ] Установить Debian 13.
-- [ ] Настроить hostname `monitor`.
-- [ ] Настроить IP-адрес в сети `192.168.85.0/24`.
-- [ ] Настроить SSH.
-- [ ] Настроить sudo для пользователя `pelmel`.
-- [ ] Обновить систему.
-- [ ] Проверить сетевую связность с `admin`, `web`, `app`, `log`.
-- [ ] Установить Prometheus.
-- [ ] Установить Grafana.
-- [ ] Установить Alertmanager.
-- [ ] Проверить порты 3000, 9090, 9093.
-- [ ] Проверить сервисы `active/enabled`.
+## Нужно сделать позже: IP reservation/static
 
-## node_exporter
+Сейчас IP адреса VM получены через DHCP VMware NAT и держатся стабильно.
 
-- [ ] Установить node_exporter на `web`.
-- [ ] Установить node_exporter на `app`.
-- [ ] Установить node_exporter на `log`.
-- [ ] Возможно установить node_exporter на `monitor`.
-- [ ] Добавить targets в Prometheus.
-- [ ] Проверить targets в Prometheus UI.
+Позже нужно:
+- [ ] сделать DHCP reservation по MAC-адресам VM; или
+- [ ] настроить статические IP внутри Debian;
+- [ ] после фиксации IP обновить sources и Ansible inventory.
 
-## Grafana datasources
+## Текущий следующий этап: node_exporter на web/app/log
+
+На `monitor` node_exporter уже работает.
+
+Дальше:
+- [ ] Установить `prometheus-node-exporter` на `web`.
+- [ ] Проверить на `web`: `systemctl status prometheus-node-exporter --no-pager`.
+- [ ] Проверить на `web`: `curl -s http://localhost:9100/metrics | head`.
+- [ ] Проверить с `monitor`: `curl -s http://192.168.85.131:9100/metrics | head`.
+
+- [ ] Установить `prometheus-node-exporter` на `app`.
+- [ ] Проверить на `app`: `systemctl status prometheus-node-exporter --no-pager`.
+- [ ] Проверить на `app`: `curl -s http://localhost:9100/metrics | head`.
+- [ ] Проверить с `monitor`: `curl -s http://192.168.85.133:9100/metrics | head`.
+
+- [ ] Установить `prometheus-node-exporter` на `log`.
+- [ ] Проверить на `log`: `systemctl status prometheus-node-exporter --no-pager`.
+- [ ] Проверить на `log`: `curl -s http://localhost:9100/metrics | head`.
+- [ ] Проверить с `monitor`: `curl -s http://192.168.85.135:9100/metrics | head`.
+
+После установки:
+- [ ] Добавить targets в `/etc/prometheus/prometheus.yml`.
+- [ ] Проверить конфиг Prometheus.
+- [ ] Перезапустить/перезагрузить Prometheus.
+- [ ] Проверить Prometheus Targets UI.
+- [ ] Проверить, что все node targets `UP`.
+
+## Дальше после node_exporter
+
+### Grafana datasources
 
 - [ ] Добавить Prometheus datasource.
 - [ ] Добавить Loki datasource.
 - [ ] Проверить запросы к Prometheus.
-- [ ] Проверить запросы к Loki.
 - [ ] Проверить Loki-запрос `{host="web",job="nginx"}`.
 - [ ] Проверить Loki-запрос `{host="app",job="app"}`.
 
-## web/app integration
-
-- [ ] Улучшить Python app.
-- [ ] Добавить `/info`.
-- [ ] Добавить `/api/time`.
-- [ ] Возможно перейти на Flask.
-- [ ] Настроить Nginx reverse proxy `/api/*` -> `app:8080`.
-- [ ] Обновить frontend-страницу.
-- [ ] Проверить Browser -> web -> app.
-
-## Dashboards и alerts
+### Dashboards и alerts
 
 - [ ] Dashboard Infrastructure Overview.
 - [ ] Dashboard Web.
@@ -119,9 +117,18 @@
 - [ ] Dashboard Logs.
 - [ ] Alert target down.
 - [ ] Alert app health fail.
-- [ ] Alert disk usage warning, если нужно.
+- [ ] Alert disk usage warning.
 
-## Финал
+### web/app integration
+
+- [ ] Улучшить Python app.
+- [ ] Добавить `/info`.
+- [ ] Добавить `/api/time`.
+- [ ] Настроить Nginx reverse proxy `/api/*` -> `app:8080`.
+- [ ] Обновить frontend-страницу.
+- [ ] Проверить Browser -> web -> app.
+
+### Финал
 
 - [ ] README.
 - [ ] IP/порты/сервисы.
