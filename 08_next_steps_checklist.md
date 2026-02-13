@@ -72,42 +72,62 @@
 - [ ] настроить статические IP внутри Debian;
 - [ ] после фиксации IP обновить sources и Ansible inventory.
 
-## Текущий следующий этап: node_exporter на web/app/log
+## Завершено: node_exporter на web/app/log + Prometheus targets
 
-На `monitor` node_exporter уже работает.
+На `monitor` node_exporter уже работал. На этом этапе добавлены остальные узлы.
 
-Дальше:
-- [ ] Установить `prometheus-node-exporter` на `web`.
-- [ ] Проверить на `web`: `systemctl status prometheus-node-exporter --no-pager`.
-- [ ] Проверить на `web`: `curl -s http://localhost:9100/metrics | head`.
-- [ ] Проверить с `monitor`: `curl -s http://192.168.85.131:9100/metrics | head`.
+- [x] Установить `prometheus-node-exporter` на `web`.
+- [x] Проверить на `web`: `systemctl status prometheus-node-exporter --no-pager`.
+- [x] Проверить на `web`: `curl -s http://localhost:9100/metrics | head`.
+- [x] Проверить с `monitor`: `curl -s http://192.168.85.131:9100/metrics | head`.
 
-- [ ] Установить `prometheus-node-exporter` на `app`.
-- [ ] Проверить на `app`: `systemctl status prometheus-node-exporter --no-pager`.
-- [ ] Проверить на `app`: `curl -s http://localhost:9100/metrics | head`.
-- [ ] Проверить с `monitor`: `curl -s http://192.168.85.133:9100/metrics | head`.
+- [x] Установить `prometheus-node-exporter` на `app`.
+- [x] Проверить на `app`: `systemctl status prometheus-node-exporter --no-pager`.
+- [x] Проверить на `app`: `curl -s http://localhost:9100/metrics | head`.
+- [x] Проверить с `monitor`: `curl -s http://192.168.85.133:9100/metrics | head`.
 
-- [ ] Установить `prometheus-node-exporter` на `log`.
-- [ ] Проверить на `log`: `systemctl status prometheus-node-exporter --no-pager`.
-- [ ] Проверить на `log`: `curl -s http://localhost:9100/metrics | head`.
-- [ ] Проверить с `monitor`: `curl -s http://192.168.85.135:9100/metrics | head`.
+- [x] Установить `prometheus-node-exporter` на `log`.
+- [x] Проверить на `log`: `systemctl status prometheus-node-exporter --no-pager`.
+- [x] Проверить на `log`: `curl -s http://localhost:9100/metrics | head`.
+- [x] Проверить с `monitor`: `curl -s http://192.168.85.135:9100/metrics | head`.
 
 После установки:
-- [ ] Добавить targets в `/etc/prometheus/prometheus.yml`.
-- [ ] Проверить конфиг Prometheus.
-- [ ] Перезапустить/перезагрузить Prometheus.
-- [ ] Проверить Prometheus Targets UI.
-- [ ] Проверить, что все node targets `UP`.
+- [x] Добавить targets в `/etc/prometheus/prometheus.yml`.
+- [x] Добавить labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`.
+- [x] Проверить конфиг Prometheus через `promtool check config`.
+- [x] Перезагрузить Prometheus.
+- [x] Проверить Prometheus Targets UI.
+- [x] Проверить, что все node targets `UP`.
 
-## Дальше после node_exporter
+Подтверждено:
 
-### Grafana datasources
+```text
+prometheus (1/1 up)
+node (4/4 up)
+```
+
+Закрепленная теория этапа:
+
+```text
+node_exporter + Prometheus = pull-модель метрик.
+Prometheus сам приходит на :9100/metrics и забирает метрики.
+Promtail + Loki = push-модель логов.
+Promtail сам отправляет logs в Loki на /loki/api/v1/push.
+```
+
+## Текущий следующий этап: Grafana datasources
 
 - [ ] Добавить Prometheus datasource.
+- [ ] URL: `http://localhost:9090`.
+- [ ] Нажать `Save & test`.
+- [ ] Проверить запрос `up{job="node"}`.
 - [ ] Добавить Loki datasource.
-- [ ] Проверить запросы к Prometheus.
+- [ ] URL: `http://192.168.85.135:3100`.
+- [ ] Нажать `Save & test`.
 - [ ] Проверить Loki-запрос `{host="web",job="nginx"}`.
 - [ ] Проверить Loki-запрос `{host="app",job="app"}`.
+
+## Дальше после Grafana datasources
 
 ### Dashboards и alerts
 

@@ -14,7 +14,7 @@
 
 Ожидаемый итог: сайт и backend работают, запросы видны в логах, узлы видны в мониторинге.
 
-Текущее состояние: frontend и backend уже работают, nginx logs и app logs уже технически доходят в Loki. Prometheus, Grafana и Alertmanager на `monitor` уже подняты; следующий шаг — поставить node_exporter на `web`, `app`, `log` и добавить targets в Prometheus.
+Текущее состояние: frontend и backend уже работают, nginx logs и app logs уже технически доходят в Loki. Prometheus, Grafana и Alertmanager на `monitor` уже подняты. node_exporter работает на `web`, `app`, `log`, `monitor`; Prometheus показывает `node (4/4 up)`. Следующий шаг — подключить Prometheus и Loki как datasources в Grafana.
 
 ## Сценарий 2. App service down
 
@@ -120,7 +120,7 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 - статус Loki;
 - последние ошибки из логов.
 
-Текущее состояние: частично готово. `monitor`, Prometheus, Grafana, Alertmanager и node_exporter на самом `monitor` уже подняты. Для полноценного Infrastructure Overview нужно поставить node_exporter на `web`, `app`, `log`, добавить targets в Prometheus и создать/импортировать Grafana dashboard.
+Текущее состояние: база готова. `monitor`, Prometheus, Grafana, Alertmanager и node_exporter на всех monitored nodes уже подняты. Prometheus показывает `node (4/4 up)`. Для полноценного Infrastructure Overview нужно подключить Prometheus datasource в Grafana и создать/импортировать Grafana dashboard.
 
 ## Сценарий 6. Recovery story
 
@@ -134,4 +134,4 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 4. Исправить.
 5. Проверить восстановление.
 
-Текущее состояние: базовая часть для recovery уже есть — `app.service`, `promtail.service`, `loki.service`, nginx logs, app logs, Prometheus, Grafana и Alertmanager. Полная демонстрация через метрики всех узлов будет возможна после установки node_exporter на `web`, `app`, `log` и добавления targets в Prometheus.
+Текущее состояние: базовая часть для recovery уже есть — `app.service`, `promtail.service`, `loki.service`, nginx logs, app logs, Prometheus, Grafana и Alertmanager. Демонстрация через метрики всех узлов уже технически возможна в Prometheus после установки node_exporter на `web`, `app`, `log` и добавления targets. Для красивой демонстрации нужно подключить Grafana datasource и dashboard.

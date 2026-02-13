@@ -9,7 +9,7 @@
 - Grafana — визуализация метрик и логов;
 - Alertmanager — прием alerts от Prometheus;
 - node_exporter — отдача системных метрик самого `monitor`;
-- позже: сбор метрик с `web`, `app`, `log`.
+- сбор метрик с `web`, `app`, `log`.
 
 ## Основная информация
 
@@ -93,7 +93,8 @@ curl -G -s "http://localhost:9090/api/v1/query" \
 
 Результат:
 - `job="prometheus", instance="localhost:9090", value="1"`;
-- `job="node", instance="localhost:9100", value="1"`.
+- `job="node", instance="localhost:9100", value="1"`;
+- также после добавления targets возвращает node metrics для `web`, `app`, `log` с labels `host="web"`, `host="app"`, `host="log"`.
 
 ## Grafana
 
@@ -245,9 +246,9 @@ curl -s http://localhost:9090/api/v1/alertmanagers | python3 -m json.tool
 
 Alert rules пока не создавались.
 
-## node_exporter на monitor
+## node_exporter и Prometheus targets
 
-`node_exporter` на `monitor` уже установлен и работает как Debian-пакет:
+`node_exporter` на `monitor` установлен и работает как Debian-пакет:
 
 ```text
 prometheus-node-exporter
@@ -259,7 +260,7 @@ prometheus-node-exporter
 prometheus-node-exporter.service
 ```
 
-Проверки:
+Проверки на `monitor`:
 
 ```bash
 systemctl status prometheus-node-exporter --no-pager
@@ -275,10 +276,35 @@ curl -s http://localhost:9100/metrics | head
 - порт `9100` слушается на `*:9100`;
 - `/metrics` возвращает метрики.
 
-Prometheus уже видит этот exporter как:
+Дополнительно node_exporter установлен на `web`, `app`, `log`. Проверено с `monitor`:
+
+```bash
+curl -s http://192.168.85.131:9100/metrics | head
+curl -s http://192.168.85.133:9100/metrics | head
+curl -s http://192.168.85.135:9100/metrics | head
+```
+
+Prometheus видит node targets как:
 
 ```text
-job="node", instance="localhost:9100"
+instance="localhost:9100", host="monitor", job="node"
+instance="192.168.85.131:9100", host="web", job="node"
+instance="192.168.85.133:9100", host="app", job="node"
+instance="192.168.85.135:9100", host="log", job="node"
+```
+
+Prometheus UI подтверждает:
+
+```text
+prometheus (1/1 up)
+node (4/4 up)
+```
+
+Концептуально:
+
+```text
+node_exporter + Prometheus = pull-модель метрик.
+node_exporter отдает :9100/metrics, Prometheus сам приходит и забирает метрики.
 ```
 
 ## Текущий статус monitor
@@ -292,16 +318,17 @@ job="node", instance="localhost:9100"
 - Grafana active/enabled, порт `3000`;
 - Alertmanager active/enabled, порт `9093`;
 - Prometheus связан с Alertmanager;
-- node_exporter на `monitor` active/enabled, порт `9100`.
+- node_exporter на `monitor`, `web`, `app`, `log` active/enabled, порт `9100`;
+- Prometheus targets: `prometheus (1/1 up)`, `node (4/4 up)`;
+- node targets имеют labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`.
 
 ## Следующий шаг
 
-Установить `node_exporter` на остальные серверы:
+Подключить datasources в Grafana:
 
 ```text
-web: 192.168.85.131
-app: 192.168.85.133
-log: 192.168.85.135
+Prometheus: http://localhost:9090
+Loki:       http://192.168.85.135:3100
 ```
 
-После этого добавить targets в Prometheus и проверить, что все targets `UP`.
+После этого проверить Prometheus query `up{job="node"}` и Loki queries `{host="web",job="nginx"}`, `{host="app",job="app"}`.

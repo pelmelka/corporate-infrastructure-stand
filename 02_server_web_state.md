@@ -19,6 +19,7 @@
 - SSH: работает
 - Nginx: работает
 - Promtail: установлен и работает как `systemd` service
+- node_exporter: установлен и работает как `systemd` service
 
 ## SSH и sudo
 
@@ -41,6 +42,7 @@ curl http://localhost
 - `nginx.service`: `active (running)`
 - `nginx.service`: `enabled`
 - порт `80`: слушается
+- порт `9100`: слушается node_exporter
 - `curl http://localhost`: возвращает пользовательский HTML
 
 ## Конфигурация Nginx
@@ -270,6 +272,56 @@ tail routine: started path=/var/log/nginx/access.log
 tail routine: started path=/var/log/nginx/error.log
 ```
 
+
+## node_exporter
+
+`node_exporter` установлен из Debian-пакета:
+
+```text
+prometheus-node-exporter
+```
+
+Сервис:
+
+```text
+prometheus-node-exporter.service
+```
+
+Проверки на `web`:
+
+```bash
+systemctl status prometheus-node-exporter --no-pager
+systemctl is-enabled prometheus-node-exporter
+systemctl is-active prometheus-node-exporter
+ss -tulpn | grep :9100
+curl -s http://localhost:9100/metrics | head
+```
+
+Подтверждено:
+
+```text
+prometheus-node-exporter.service active (running)
+prometheus-node-exporter.service enabled
+порт 9100 LISTEN
+/metrics возвращает системные метрики
+```
+
+Проверка с `monitor`:
+
+```bash
+curl -s http://192.168.85.131:9100/metrics | head
+```
+
+Результат: `monitor` получает метрики с `web`.
+
+В Prometheus target добавлен как:
+
+```text
+instance="192.168.85.131:9100"
+host="web"
+job="node"
+```
+
 ## Проверка доставки nginx logs в Loki
 
 Сгенерированы запросы на `web`:
@@ -351,9 +403,12 @@ curl http://192.168.85.131
 - HTML-страница отдается;
 - nginx access/error logs существуют;
 - Promtail установлен;
+- node_exporter установлен;
 - `promtail.service` active/enabled;
+- `prometheus-node-exporter.service` active/enabled;
 - Promtail читает `/var/log/nginx/*.log`;
 - Promtail отправляет nginx logs в Loki на `log`;
-- Loki query_range возвращает nginx access logs с labels `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+- Loki query_range возвращает nginx access logs с labels `host=web`, `job=nginx`, `service=frontend`, `env=lab`;
+- Prometheus видит системные метрики `web` через `192.168.85.131:9100` с label `host="web"`.
 
-Осталось: более осмысленная страница, reverse proxy к `app`, node_exporter, подключение к Prometheus.
+Осталось: более осмысленная страница, reverse proxy к `app`, подключение datasource/dashboard в Grafana.

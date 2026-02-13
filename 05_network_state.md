@@ -73,9 +73,9 @@ VMnet8 host adapter: 192.168.85.1
 ```text
 Proxmox: 8006/tcp
 admin:   22/tcp
-web:     22/tcp, 80/tcp, 9080/tcp Promtail, 9100/tcp node_exporter план
-app:     22/tcp, 8080/tcp, 9080/tcp Promtail, 9100/tcp node_exporter план
-log:     22/tcp, 3100/tcp Loki HTTP, 9095/tcp Loki gRPC, 9100/tcp node_exporter план
+web:     22/tcp, 80/tcp, 9080/tcp Promtail, 9100/tcp node_exporter
+app:     22/tcp, 8080/tcp, 9080/tcp Promtail, 9100/tcp node_exporter
+log:     22/tcp, 3100/tcp Loki HTTP, 9095/tcp Loki gRPC, 9100/tcp node_exporter
 monitor: 22/tcp, 3000/tcp Grafana, 9090/tcp Prometheus, 9093/tcp Alertmanager, 9100/tcp node_exporter
 ```
 
@@ -103,6 +103,34 @@ ping 192.168.85.135
 ```
 
 Результат: связность есть.
+
+
+## Проверки node_exporter с monitor
+
+`monitor` успешно получает системные метрики со всех node_exporter endpoints:
+
+```bash
+curl -s http://localhost:9100/metrics | head
+curl -s http://192.168.85.131:9100/metrics | head
+curl -s http://192.168.85.133:9100/metrics | head
+curl -s http://192.168.85.135:9100/metrics | head
+```
+
+Prometheus UI показывает:
+
+```text
+prometheus (1/1 up)
+node (4/4 up)
+```
+
+Targets:
+
+```text
+monitor: localhost:9100, host="monitor"
+web:     192.168.85.131:9100, host="web"
+app:     192.168.85.133:9100, host="app"
+log:     192.168.85.135:9100, host="log"
+```
 
 ## Доступ с Windows
 

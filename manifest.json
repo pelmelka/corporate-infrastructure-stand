@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "admin/web/app/log completed for current logging stage; monitor VM created; Prometheus, Grafana, Alertmanager active/enabled; node_exporter active on monitor",
-  "last_completed_stage": "monitor base stack: Prometheus + Grafana + Alertmanager",
-  "current_next_stage": "node_exporter on web, app, log; then add Prometheus targets",
+  "status": "admin/web/app/log completed for logging stage; monitor VM created; Prometheus, Grafana, Alertmanager active/enabled; node_exporter active on monitor/web/app/log; Prometheus targets node (4/4 up) with host labels",
+  "last_completed_stage": "node_exporter on web/app/log + Prometheus targets node (4/4 up)",
+  "current_next_stage": "Grafana datasources: connect Prometheus and Loki, then verify queries",
   "files": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",

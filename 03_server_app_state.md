@@ -20,6 +20,7 @@
 - SSH: работает
 - App service: работает
 - Promtail: установлен и работает как `systemd` service
+- node_exporter: установлен и работает как `systemd` service
 
 ## Сеть
 
@@ -391,6 +392,58 @@ tail routine: started path=/var/log/app/app.log
 
 Предупреждение `enable watchConfig` было замечено, но не критично: сервис работает.
 
+
+## node_exporter
+
+`node_exporter` установлен из Debian-пакета:
+
+```text
+prometheus-node-exporter
+```
+
+Сервис:
+
+```text
+prometheus-node-exporter.service
+```
+
+Проверки на `app`:
+
+```bash
+systemctl status prometheus-node-exporter --no-pager
+systemctl is-enabled prometheus-node-exporter
+systemctl is-active prometheus-node-exporter
+ss -tulpn | grep :9100
+curl -s http://localhost:9100/metrics | head
+```
+
+Подтверждено:
+
+```text
+prometheus-node-exporter.service active (running)
+prometheus-node-exporter.service enabled
+порт 9100 LISTEN
+/metrics возвращает системные метрики
+```
+
+Проверка с `monitor`:
+
+```bash
+curl -s http://192.168.85.133:9100/metrics | head
+```
+
+Результат: `monitor` получает метрики с `app`.
+
+В Prometheus target добавлен как:
+
+```text
+instance="192.168.85.133:9100"
+host="app"
+job="node"
+```
+
+Примечание: предупреждение `curl: (23) Failure writing output to destination` при использовании `curl | head` не является проблемой node_exporter. `head` закрывает pipe после первых строк, а `curl` еще пытается писать дальше.
+
 ## Проверка доставки app logs в Loki
 
 Сгенерированы запросы на `app`:
@@ -448,19 +501,20 @@ detected_level="warn"
 - `app.service` active/enabled;
 - приложение пишет полезные логи в `/var/log/app/app.log`;
 - Promtail 3.5.0 установлен;
+- node_exporter установлен;
 - пользователь `promtail` создан и добавлен в `adm`;
 - `promtail.service` active/enabled;
+- `prometheus-node-exporter.service` active/enabled;
 - Promtail читает `/var/log/app/*.log`;
 - Promtail отправляет app logs в Loki на `http://192.168.85.135:3100/loki/api/v1/push`;
-- Loki query_range возвращает app logs с labels `host=app`, `job=app`, `service=python-backend`, `env=lab`.
+- Loki query_range возвращает app logs с labels `host=app`, `job=app`, `service=python-backend`, `env=lab`;
+- Prometheus видит системные метрики `app` через `192.168.85.133:9100` с label `host="app"`.
 
 ## Следующий шаг
 
-Перейти к этапу **monitor / Prometheus / Grafana**:
+Следующий этап: **Grafana datasources и dashboard**:
 
-- создать VM `monitor`;
-- установить Debian 13;
-- настроить SSH и sudo;
-- установить Prometheus, Grafana, Alertmanager;
-- затем добавить node_exporter на `web`, `app`, `log`, `monitor`;
-- подключить Loki и Prometheus в Grafana.
+- подключить Prometheus datasource в Grafana;
+- подключить Loki datasource в Grafana;
+- проверить query `up{job="node"}`;
+- проверить Loki-запросы `{host="web",job="nginx"}` и `{host="app",job="app"}`.

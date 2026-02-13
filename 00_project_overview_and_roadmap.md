@@ -33,9 +33,9 @@ monitor:9090 Prometheus -> monitor:9100 node_exporter  # реализовано:
 Prometheus -> Alertmanager:9093                        # реализовано: Prometheus видит Alertmanager
 Browser -> monitor:9090 Prometheus UI                  # реализовано
 Browser -> monitor:3000 Grafana UI                     # реализовано
-web/app/log -> node_exporter:9100 -> Prometheus         # текущий следующий этап
-Grafana -> Prometheus:9090                             # план: datasource
-Grafana -> Loki:3100                                   # план: datasource
+web/app/log -> node_exporter:9100 -> Prometheus         # реализовано: node (4/4 up)
+Grafana -> Prometheus:9090                             # текущий следующий этап: datasource
+Grafana -> Loki:3100                                   # текущий следующий этап: datasource
 web:80 -> app:8080 через reverse proxy                 # план
 ```
 
@@ -60,7 +60,7 @@ web:80 -> app:8080 через reverse proxy                 # план
 
 ### web
 
-Frontend / Nginx server. Сейчас отдает простую HTML-страницу. Promtail установлен и отправляет nginx access/error logs в Loki. В финале должен отдавать более осмысленный frontend и проксировать `/api/*` на `app:8080`. Также будет источником системных метрик через node_exporter.
+Frontend / Nginx server. Сейчас отдает простую HTML-страницу. Promtail установлен и отправляет nginx access/error logs в Loki. В финале должен отдавать более осмысленный frontend и проксировать `/api/*` на `app:8080`. Также является источником системных метрик через node_exporter.
 
 ### app
 
@@ -68,11 +68,11 @@ Backend/application node. Сейчас Python-приложение на стан
 
 ### log
 
-Централизованный сервер логирования. На нем Loki. Loki установлен и запущен как `systemd` service. Принимает nginx logs от `web` и app logs от `app`. Позже Grafana будет подключаться к Loki как datasource.
+Централизованный сервер логирования. На нем Loki. Loki установлен и запущен как `systemd` service. Принимает nginx logs от `web` и app logs от `app`. Позже Grafana будет подключаться к Loki как datasource. На `log` также работает node_exporter для системных метрик.
 
 ### monitor
 
-Сервер мониторинга, визуализации и алертов. На нем уже установлены Prometheus, Grafana, Alertmanager и node_exporter. Сейчас Prometheus собирает метрики самого `monitor`; следующий шаг — поставить node_exporter на `web`, `app`, `log` и добавить их как targets.
+Сервер мониторинга, визуализации и алертов. На нем уже установлены Prometheus, Grafana, Alertmanager и node_exporter. Сейчас Prometheus собирает метрики самого `monitor` и метрики `web`, `app`, `log` через node_exporter. Prometheus показывает `node (4/4 up)`; следующий шаг — подключить Prometheus и Loki как datasources в Grafana.
 
 ## Что уже сделано
 
@@ -199,7 +199,9 @@ Backend/application node. Сейчас Python-приложение на стан
 - Prometheus уже знает Alertmanager: `localhost:9093` отображается в `/api/v1/alertmanagers`.
 - `prometheus-node-exporter.service` на `monitor` active/enabled.
 - node_exporter на `monitor` слушает порт `9100`.
-- Prometheus уже видит локальные targets `job="prometheus", instance="localhost:9090"` и `job="node", instance="localhost:9100"`.
+- node_exporter установлен и active/enabled на `web`, `app`, `log`.
+- Prometheus видит targets `prometheus (1/1 up)` и `node (4/4 up)`.
+- У node targets добавлены labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`.
 
 #### Особенность установки Grafana
 
@@ -232,13 +234,22 @@ DNS, ping и TLS handshake при этом работали. Это означа
 
 Итог: создана VM `monitor`; Debian, SSH, sudo и сеть работают; установлены Prometheus, Grafana, Alertmanager; сервисы active/enabled; доступны порты 3000, 9090, 9093; node_exporter на `monitor` работает на 9100.
 
-### Этап 5. Метрики — текущий следующий этап
+### Этап 5. Метрики — завершено
 
-Итог: node_exporter должен быть установлен на `web`, `app`, `log`; Prometheus должен видеть targets как UP; Grafana должна видеть Prometheus datasource; будут доступны CPU/RAM/disk/network/uptime метрики по всем узлам.
+Итог: node_exporter установлен на `web`, `app`, `log`, `monitor`; Prometheus видит targets как `node (4/4 up)`; добавлены labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`; доступны CPU/RAM/disk/network/uptime метрики по всем узлам.
 
-### Этап 6. Grafana + Loki + Prometheus
+Концептуально зафиксировано:
 
-Итог: в Grafana добавлены datasources Loki и Prometheus; видны логи `web` и `app`, метрики узлов, dashboard'ы.
+```text
+node_exporter + Prometheus = pull-модель метрик.
+Prometheus сам приходит на :9100/metrics и забирает метрики.
+Promtail + Loki = push-модель логов.
+Promtail сам отправляет logs в Loki на /loki/api/v1/push.
+```
+
+### Этап 6. Grafana + Loki + Prometheus — текущий следующий этап
+
+Итог: в Grafana должны быть добавлены datasources Loki и Prometheus; должны быть видны логи `web` и `app`, метрики узлов, dashboard'ы.
 
 ### Этап 7. Интеграция `web` и `app`
 
@@ -262,9 +273,9 @@ DNS, ping и TLS handshake при этом работали. Это означа
 
 ## Текущий прогресс
 
-Оценка текущего прогресса после завершения базового `monitor`: **75–80% проекта**.
+Оценка текущего прогресса после завершения node_exporter и Prometheus targets: **80–85% проекта**.
 
-Текущий ближайший следующий шаг: **поставить node_exporter на `web`, `app`, `log`, затем добавить targets в Prometheus**.
+Текущий ближайший следующий шаг: **подключить Prometheus и Loki как datasources в Grafana**.
 
 Оценка остатка:
 

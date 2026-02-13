@@ -163,9 +163,12 @@
 - UI: `http://192.168.85.137:9090`;
 - readiness: `curl http://localhost:9090/-/ready -> Prometheus Server is Ready.`;
 - API-запрос `query=up` возвращает `job="prometheus", instance="localhost:9090", value="1"`;
-- также видит локальный node_exporter на `localhost:9100`.
+- видит local node_exporter на `localhost:9100`;
+- видит node_exporter на `web`, `app`, `log`;
+- Prometheus UI показывает `node (4/4 up)`;
+- у node targets добавлены labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`.
 
-Роль: сбор и хранение метрик. Сейчас собирает метрики самого `monitor`; следующий шаг — добавить `web`, `app`, `log` как targets после установки node_exporter.
+Роль: сбор и хранение метрик. Сейчас собирает метрики самого `monitor` и системные метрики `web`, `app`, `log` через node_exporter.
 
 ### Grafana
 
@@ -235,26 +238,41 @@ curl -s http://localhost:9090/api/v1/alertmanagers | python3 -m json.tool
 
 ### node_exporter
 
-На `monitor` уже установлен как пакет `prometheus-node-exporter`.
-
-Текущее состояние на `monitor`:
-
-- service: `prometheus-node-exporter.service`;
-- status: `active (running)`;
-- autostart: `enabled`;
-- порт: `9100`;
-- `/metrics` возвращает системные метрики;
-- Prometheus видит target `job="node", instance="localhost:9100"`.
-
-Следующий шаг: установить `node_exporter` на:
+`node_exporter` установлен как пакет `prometheus-node-exporter` на всех monitored nodes:
 
 ```text
-web: 192.168.85.131
-app: 192.168.85.133
-log: 192.168.85.135
+monitor: localhost:9100
+web:     192.168.85.131:9100
+app:     192.168.85.133:9100
+log:     192.168.85.135:9100
 ```
 
-После этого добавить targets в `/etc/prometheus/prometheus.yml` на `monitor` и проверить, что все targets `UP`.
+Текущее состояние:
+
+- service: `prometheus-node-exporter.service`;
+- status: `active (running)` на `monitor`, `web`, `app`, `log`;
+- autostart: `enabled` на `monitor`, `web`, `app`, `log`;
+- порт: `9100`;
+- `/metrics` возвращает системные метрики;
+- `monitor` успешно получает `/metrics` с `web`, `app`, `log`;
+- Prometheus UI показывает `node (4/4 up)`.
+
+Prometheus labels:
+
+```text
+instance="localhost:9100", host="monitor", job="node"
+instance="192.168.85.131:9100", host="web", job="node"
+instance="192.168.85.133:9100", host="app", job="node"
+instance="192.168.85.135:9100", host="log", job="node"
+```
+
+Концептуально:
+
+```text
+node_exporter + Prometheus = pull-модель метрик.
+node_exporter отдает endpoint :9100/metrics, Prometheus сам приходит и забирает метрики.
+Promtail + Loki = push-модель логов: Promtail сам отправляет логи в Loki.
+```
 
 ## Планируемые dashboard'ы
 
@@ -279,4 +297,4 @@ log: 192.168.85.135
 2. App down: остановить `app.service`, увидеть ошибку, поднять обратно.
 3. Web logs: сгенерировать HTTP-запросы и увидеть nginx logs в Loki.
 4. App logs: сгенерировать HTTP-запросы и увидеть app logs в Loki.
-5. Infrastructure overview: показать состояние всех узлов.
+5. Infrastructure overview: показать состояние всех узлов. База для этого готова: Prometheus видит node targets `4/4 up`.
