@@ -156,27 +156,55 @@ curl -s http://localhost:9090/api/v1/alertmanagers | python3 -m json.tool
 }
 ```
 
-Пока Prometheus видит локальные targets:
+Prometheus видит targets:
 
 ```text
 job="prometheus", instance="localhost:9090"
-job="node", instance="localhost:9100"
+job="node", instance="localhost:9100", host="monitor"
+job="node", instance="192.168.85.131:9100", host="web"
+job="node", instance="192.168.85.133:9100", host="app"
+job="node", instance="192.168.85.135:9100", host="log"
 ```
 
-Будущий фрагмент после установки node_exporter на `web`, `app`, `log`:
+Текущий фрагмент node targets после установки node_exporter на `web`, `app`, `log`:
 
 ```yaml
 scrape_configs:
   - job_name: node
     static_configs:
-      - targets:
-          - localhost:9100
-          - 192.168.85.131:9100
-          - 192.168.85.133:9100
-          - 192.168.85.135:9100
+      - targets: ['localhost:9100']
+        labels:
+          host: monitor
+
+      - targets: ['192.168.85.131:9100']
+        labels:
+          host: web
+
+      - targets: ['192.168.85.133:9100']
+        labels:
+          host: app
+
+      - targets: ['192.168.85.135:9100']
+        labels:
+          host: log
 ```
 
-Важно: перед изменением нужно посмотреть фактический текущий `/etc/prometheus/prometheus.yml` и добавить targets без дублирования.
+Проверка:
+
+```bash
+promtool check config /etc/prometheus/prometheus.yml
+sudo systemctl reload prometheus
+curl -G -s "http://localhost:9090/api/v1/query"   --data-urlencode 'query=up{job="node"}' | python3 -m json.tool
+```
+
+Подтверждено:
+
+```text
+prometheus (1/1 up)
+node (4/4 up)
+```
+
+Важно: `instance` остается техническим адресом target, а `host` — человекопонятной меткой сервера.
 
 ## Grafana
 
@@ -213,7 +241,7 @@ UI:
 http://192.168.85.137:3000
 ```
 
-Datasources пока не добавлены.
+Datasources пока не добавлены. Следующий этап — подключить Prometheus и Loki как datasources.
 
 Планируемые datasources:
 
@@ -252,7 +280,18 @@ OK
 
 Debian-пакет Alertmanager не включает полноценный web UI. По `http://192.168.85.137:9093` открывается простая HTML-страница с API/health links.
 
-## node_exporter на monitor
+## node_exporter
+
+node_exporter установлен и работает на всех monitored nodes:
+
+```text
+monitor: localhost:9100, host="monitor"
+web:     192.168.85.131:9100, host="web"
+app:     192.168.85.133:9100, host="app"
+log:     192.168.85.135:9100, host="log"
+```
+
+### node_exporter на monitor
 
 Сервис:
 
