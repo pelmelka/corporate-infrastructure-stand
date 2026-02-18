@@ -14,7 +14,7 @@
 
 Ожидаемый итог: сайт и backend работают, запросы видны в логах, узлы видны в мониторинге.
 
-Текущее состояние: frontend и backend уже работают, nginx logs и app logs уже технически доходят в Loki. Prometheus, Grafana и Alertmanager на `monitor` уже подняты. node_exporter работает на `web`, `app`, `log`, `monitor`; Prometheus показывает `node (4/4 up)`. Следующий шаг — подключить Prometheus и Loki как datasources в Grafana.
+Текущее состояние: frontend и backend уже работают, nginx logs и app logs доходят в Loki. Prometheus, Grafana и Alertmanager на `monitor` подняты. node_exporter работает на `web`, `app`, `log`, `monitor`; Prometheus показывает `node (4/4 up)`. В Grafana подключены datasources Prometheus и Loki; в Explore проверены `up{job="node"}`, `{host="web", job="nginx"}`, `{host="app", job="app"}`. Следующий шаг — собрать dashboard Infrastructure Overview.
 
 ## Сценарий 2. App service down
 
@@ -120,7 +120,7 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 - статус Loki;
 - последние ошибки из логов.
 
-Текущее состояние: база готова. `monitor`, Prometheus, Grafana, Alertmanager и node_exporter на всех monitored nodes уже подняты. Prometheus показывает `node (4/4 up)`. Для полноценного Infrastructure Overview нужно подключить Prometheus datasource в Grafana и создать/импортировать Grafana dashboard.
+Текущее состояние: база готова. `monitor`, Prometheus, Grafana, Alertmanager и node_exporter на всех monitored nodes уже подняты. Prometheus показывает `node (4/4 up)`. Prometheus и Loki datasources в Grafana уже подключены и проверены. Для полноценного Infrastructure Overview осталось создать/импортировать Grafana dashboard.
 
 ## Сценарий 6. Recovery story
 
@@ -134,4 +134,4 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 4. Исправить.
 5. Проверить восстановление.
 
-Текущее состояние: базовая часть для recovery уже есть — `app.service`, `promtail.service`, `loki.service`, nginx logs, app logs, Prometheus, Grafana и Alertmanager. Демонстрация через метрики всех узлов уже технически возможна в Prometheus после установки node_exporter на `web`, `app`, `log` и добавления targets. Для красивой демонстрации нужно подключить Grafana datasource и dashboard.
+Текущее состояние: базовая часть для recovery уже есть — `app.service`, `promtail.service`, `loki.service`, nginx logs, app logs, Prometheus, Grafana и Alertmanager. В Grafana уже подключены Prometheus и Loki datasources, поэтому демонстрация через метрики и логи технически возможна в Grafana Explore. Для красивой демонстрации осталось создать dashboard.

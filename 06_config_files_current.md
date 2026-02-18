@@ -241,14 +241,64 @@ UI:
 http://192.168.85.137:3000
 ```
 
-Datasources пока не добавлены. Следующий этап — подключить Prometheus и Loki как datasources.
+### Grafana datasources
 
-Планируемые datasources:
+Datasources добавлены через Grafana UI и проверены в Explore.
+
+Prometheus datasource:
 
 ```text
-Prometheus: http://localhost:9090
-Loki:       http://192.168.85.135:3100
+Name: Prometheus
+URL:  http://localhost:9090
 ```
+
+Почему `localhost`: Grafana и Prometheus находятся на одном сервере `monitor`, поэтому для Grafana Prometheus доступен локально.
+
+Проверки в Grafana:
+
+```text
+Save & test -> Successfully queried the Prometheus API
+```
+
+```promql
+up{job="node"}
+```
+
+Результат: 4 series со значением `1`:
+
+```text
+host="web", instance="192.168.85.131:9100"
+host="app", instance="192.168.85.133:9100"
+host="log", instance="192.168.85.135:9100"
+host="monitor", instance="localhost:9100"
+```
+
+Loki datasource:
+
+```text
+Name: Loki
+URL:  http://192.168.85.135:3100
+```
+
+Почему IP: Loki находится на отдельном сервере `log`, а не на `monitor`, поэтому `localhost:3100` здесь был бы неправильным адресом.
+
+Проверки в Grafana:
+
+```text
+Save & test -> Data source successfully connected
+```
+
+```logql
+{host="web", job="nginx"}
+```
+
+Результат: видны nginx access logs с `web`, включая `GET /` и `GET /not-found`.
+
+```logql
+{host="app", job="app"}
+```
+
+Результат: видны app logs с `app`, включая `path=/`, `path=/health`, `path=/bad-endpoint`, `status=200`, `status=404`, уровни `INFO`/`WARN`.
 
 ## Alertmanager
 
@@ -277,6 +327,20 @@ active
 *:9093 LISTEN
 OK
 ```
+
+Файл пользовательских параметров запуска:
+
+```text
+monitor: /etc/default/prometheus-alertmanager
+```
+
+Текущая важная строка:
+
+```bash
+ARGS="--cluster.listen-address="
+```
+
+Причина: после reboot Alertmanager падал с ошибкой определения advertise address для cluster/gossip mesh. В single-node lab кластер Alertmanager не используется, поэтому cluster listener отключен пустым значением `--cluster.listen-address=`. После изменения сервис успешно поднимается после reboot.
 
 Debian-пакет Alertmanager не включает полноценный web UI. По `http://192.168.85.137:9093` открывается простая HTML-страница с API/health links.
 

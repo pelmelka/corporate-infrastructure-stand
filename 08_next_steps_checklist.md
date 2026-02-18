@@ -115,21 +115,24 @@ Promtail + Loki = push-модель логов.
 Promtail сам отправляет logs в Loki на /loki/api/v1/push.
 ```
 
-## Текущий следующий этап: Grafana datasources
+## Завершено: Grafana datasources
 
-- [ ] Добавить Prometheus datasource.
-- [ ] URL: `http://localhost:9090`.
-- [ ] Нажать `Save & test`.
-- [ ] Проверить запрос `up{job="node"}`.
-- [ ] Добавить Loki datasource.
-- [ ] URL: `http://192.168.85.135:3100`.
-- [ ] Нажать `Save & test`.
-- [ ] Проверить Loki-запрос `{host="web",job="nginx"}`.
-- [ ] Проверить Loki-запрос `{host="app",job="app"}`.
+- [x] Добавить Prometheus datasource.
+- [x] URL: `http://localhost:9090`.
+- [x] Нажать `Save & test`.
+- [x] Проверить запрос `up{job="node"}`.
+- [x] Подтверждено: 4 series со значением `1` для `web`, `app`, `log`, `monitor`.
+- [x] Добавить Loki datasource.
+- [x] URL: `http://192.168.85.135:3100`.
+- [x] Нажать `Save & test`.
+- [x] Проверить Loki-запрос `{host="web", job="nginx"}`.
+- [x] Подтверждено: видны nginx access logs с `web`.
+- [x] Проверить Loki-запрос `{host="app", job="app"}`.
+- [x] Подтверждено: видны app logs с `path=/`, `path=/health`, `path=/bad-endpoint`, `status=200`, `status=404`.
 
-## Дальше после Grafana datasources
+## Текущий следующий этап: Dashboards и alerts
 
-### Dashboards и alerts
+### Dashboards
 
 - [ ] Dashboard Infrastructure Overview.
 - [ ] Dashboard Web.

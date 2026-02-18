@@ -183,10 +183,18 @@
 - UI: `http://192.168.85.137:3000`;
 - `curl -I http://localhost:3000` возвращает `HTTP/1.1 302 Found` и `Location: /login`.
 
-Роль: UI для dashboard'ов, логов и метрик. В Grafana нужно будет подключить datasources:
+Роль: UI для dashboard'ов, логов и метрик. Grafana подключена к двум datasources:
 
-- Loki: `http://192.168.85.135:3100`;
-- Prometheus: `http://localhost:9090` или `http://192.168.85.137:9090`.
+- Prometheus: `http://localhost:9090`;
+- Loki: `http://192.168.85.135:3100`.
+
+Проверено:
+
+- Prometheus datasource: `Save & test` успешен;
+- Prometheus query `up{job="node"}` показывает `web`, `app`, `log`, `monitor` со значением `1`;
+- Loki datasource: `Save & test` успешен;
+- LogQL `{host="web", job="nginx"}` показывает nginx logs;
+- LogQL `{host="app", job="app"}` показывает app logs.
 
 Особенность установки: официальный Grafana APT/download был недоступен из текущей сети/маршрута:
 
@@ -210,7 +218,9 @@ dl.grafana.com/...deb -> HTTP 451
 - autostart: `enabled`;
 - порт: `9093`;
 - readiness: `curl http://localhost:9093/-/ready -> OK`;
-- Prometheus уже знает Alertmanager через `localhost:9093`.
+- Prometheus уже знает Alertmanager через `localhost:9093`;
+- после reboot сервис поднимается корректно;
+- cluster/gossip listener отключен через `/etc/default/prometheus-alertmanager`: `ARGS="--cluster.listen-address="`.
 
 Проверка Prometheus API:
 
@@ -273,6 +283,21 @@ node_exporter + Prometheus = pull-модель метрик.
 node_exporter отдает endpoint :9100/metrics, Prometheus сам приходит и забирает метрики.
 Promtail + Loki = push-модель логов: Promtail сам отправляет логи в Loki.
 ```
+
+### openipmi
+
+`openipmi.service` был обнаружен в состоянии `failed` на `web`, `app`, `log`, `monitor`. Он не является частью целевой архитектуры проекта. `openipmi` относится к IPMI/management-интерфейсам физического серверного железа; в текущем lab все узлы являются VM внутри VMware/Proxmox, поэтому настоящего IPMI/BMC-устройства нет и сервис не может подняться в `active`.
+
+Пакет появился на monitored nodes как побочный элемент monitoring-related установки/collector-набора вокруг node_exporter. На `admin` его нет, потому что `admin` сейчас control node и node_exporter stack на него не ставился.
+
+Принятое решение: не удалять пакет, а отключить сервис и сбросить failed-state на `web`, `app`, `log`, `monitor`:
+
+```bash
+sudo systemctl disable --now openipmi.service
+sudo systemctl reset-failed openipmi.service
+```
+
+После этого `openipmi.service` не должен мешать проверкам `systemctl list-units --type=service --state=failed`.
 
 ## Планируемые dashboard'ы
 

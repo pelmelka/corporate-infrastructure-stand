@@ -168,6 +168,70 @@ sudo apt-get update
 
 Важно: директории `/etc/apt/keyrings` и `/etc/apt/sources.list.d` не удалялись.
 
+### Grafana datasources
+
+В Grafana добавлены и проверены два datasource.
+
+Prometheus datasource:
+
+```text
+Name: Prometheus
+URL:  http://localhost:9090
+```
+
+Причина использования `localhost`: Prometheus и Grafana находятся на одном сервере `monitor`.
+
+Проверено:
+
+```text
+Save & test -> Successfully queried the Prometheus API
+```
+
+В Grafana Explore выполнен запрос:
+
+```promql
+up{job="node"}
+```
+
+Результат: 4 series со значением `1`:
+
+```text
+host="web", instance="192.168.85.131:9100"
+host="app", instance="192.168.85.133:9100"
+host="log", instance="192.168.85.135:9100"
+host="monitor", instance="localhost:9100"
+```
+
+Loki datasource:
+
+```text
+Name: Loki
+URL:  http://192.168.85.135:3100
+```
+
+Причина использования IP: Loki находится на отдельном сервере `log`, а не на `monitor`.
+
+Проверено:
+
+```text
+Save & test -> Data source successfully connected
+```
+
+В Grafana Explore выполнены LogQL-запросы:
+
+```logql
+{host="web", job="nginx"}
+```
+
+Результат: видны nginx access logs с `web`, включая `GET /` и `GET /not-found`.
+
+```logql
+{host="app", job="app"}
+```
+
+Результат: видны app logs с `app`, включая `path=/`, `path=/health`, `path=/bad-endpoint`, `status=200`, `status=404`, уровни `INFO`/`WARN`.
+
+
 ## Alertmanager
 
 Alertmanager установлен из стандартных Debian-репозиториев как пакет:
@@ -197,7 +261,24 @@ curl http://localhost:9093/-/ready
 - `prometheus-alertmanager.service active (running)`;
 - `enabled`;
 - порт `9093` слушается на `*:9093`;
-- `/ - /ready -> OK`.
+- `/ - /ready -> OK`;
+- после исправления параметров запуска сервис также корректно поднимается после reboot.
+
+После выключения/включения VM была обнаружена проблема автозапуска: Alertmanager падал с ошибками `couldn't deduce an advertise address`, `unable to initialize gossip mesh`, `Failed to get final advertise address`. Причина: для single-node lab не нужен cluster/gossip mesh, а Alertmanager не смог сам определить advertise address.
+
+Исправление внесено в файл:
+
+```text
+/etc/default/prometheus-alertmanager
+```
+
+Текущая строка параметров запуска:
+
+```bash
+ARGS="--cluster.listen-address="
+```
+
+Пустое значение у `--cluster.listen-address=` отключает cluster/gossip listener. После `reset-failed`, `restart` и последующего reboot `prometheus-alertmanager.service` остается `active (running)`.
 
 `curl -I http://localhost:9093` возвращал `405 Method Not Allowed`, это нормально: `-I` делает HEAD-запрос, а endpoint разрешает `GET, OPTIONS`.
 
@@ -309,7 +390,7 @@ node_exporter отдает :9100/metrics, Prometheus сам приходит и 
 
 ## Текущий статус monitor
 
-`monitor` считается базово готовым observability node.
+`monitor` считается готовым observability node с подключенными Grafana datasources.
 
 Готово:
 - VM `monitor` создана;
@@ -317,18 +398,26 @@ node_exporter отдает :9100/metrics, Prometheus сам приходит и 
 - Prometheus active/enabled, порт `9090`;
 - Grafana active/enabled, порт `3000`;
 - Alertmanager active/enabled, порт `9093`;
+- для Alertmanager отключен cluster/gossip listener через `ARGS="--cluster.listen-address="`, после reboot сервис поднимается корректно;
 - Prometheus связан с Alertmanager;
 - node_exporter на `monitor`, `web`, `app`, `log` active/enabled, порт `9100`;
 - Prometheus targets: `prometheus (1/1 up)`, `node (4/4 up)`;
-- node targets имеют labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`.
+- node targets имеют labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`;
+- Grafana datasource Prometheus подключен и проверен;
+- Grafana datasource Loki подключен и проверен;
+- в Grafana Explore видны node metrics, nginx logs и app logs.
 
 ## Следующий шаг
 
-Подключить datasources в Grafana:
+Создать первый Grafana dashboard **Infrastructure Overview**.
+
+Минимальный состав dashboard:
 
 ```text
-Prometheus: http://localhost:9090
-Loki:       http://192.168.85.135:3100
+- panel со статусом targets: up{job="node"}
+- CPU по host
+- RAM по host
+- Disk usage по host
+- панель/ссылка на web logs: {host="web", job="nginx"}
+- панель/ссылка на app logs: {host="app", job="app"}
 ```
-
-После этого проверить Prometheus query `up{job="node"}` и Loki queries `{host="web",job="nginx"}`, `{host="app",job="app"}`.
