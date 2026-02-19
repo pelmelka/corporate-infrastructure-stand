@@ -390,7 +390,7 @@ node_exporter отдает :9100/metrics, Prometheus сам приходит и 
 
 ## Текущий статус monitor
 
-`monitor` считается готовым observability node с подключенными Grafana datasources.
+`monitor` считается готовым observability node с подключенными Grafana datasources и созданным dashboard `Infrastructure Overview`.
 
 Готово:
 - VM `monitor` создана;
@@ -405,19 +405,133 @@ node_exporter отдает :9100/metrics, Prometheus сам приходит и 
 - node targets имеют labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`;
 - Grafana datasource Prometheus подключен и проверен;
 - Grafana datasource Loki подключен и проверен;
-- в Grafana Explore видны node metrics, nginx logs и app logs.
+- в Grafana Explore видны node metrics, nginx logs и app logs;
+- создан dashboard `Infrastructure Overview`;
+- dashboard показывает targets UP, Disk, CPU, RAM, Web nginx logs и App logs.
 
-## Следующий шаг
+## Grafana dashboard Infrastructure Overview
 
-Создать первый Grafana dashboard **Infrastructure Overview**.
-
-Минимальный состав dashboard:
+Создан первый dashboard:
 
 ```text
-- panel со статусом targets: up{job="node"}
-- CPU по host
-- RAM по host
-- Disk usage по host
-- панель/ссылка на web logs: {host="web", job="nginx"}
-- панель/ссылка на app logs: {host="app", job="app"}
+Infrastructure Overview
 ```
+
+Назначение: один обзорный экран для состояния инфраструктуры: доступность узлов, базовые ресурсы и свежие web/app logs.
+
+Dashboard создан через Grafana UI. JSON export пока не фиксировался в sources.
+
+### Panels
+
+#### Targets UP
+
+Datasource: `Prometheus`.
+
+```promql
+up{job="node"}
+```
+
+Настройки:
+
+```text
+Visualization: Stat
+Legend: {{host}}
+Type: Instant
+Value mappings:
+  1 -> UP
+  0 -> DOWN
+```
+
+Подтверждено: `web`, `app`, `log`, `monitor` отображаются как `UP`.
+
+Важно: `up=1` означает, что Prometheus успешно сделал scrape target `/metrics`. Это не абсолютная проверка здоровья приложения.
+
+#### CPU Usage by host
+
+Datasource: `Prometheus`.
+
+```promql
+100 - (avg by (host) (rate(node_cpu_seconds_total{job="node", mode="idle"}[5m])) * 100)
+```
+
+#### RAM Usage by host
+
+Datasource: `Prometheus`.
+
+```promql
+100 * (1 - (node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}))
+```
+
+#### Disk Usage by host
+
+Datasource: `Prometheus`.
+
+```promql
+100 * (1 - (
+  node_filesystem_avail_bytes{job="node", mountpoint="/", fstype!~"tmpfs|overlay|squashfs"}
+  /
+  node_filesystem_size_bytes{job="node", mountpoint="/", fstype!~"tmpfs|overlay|squashfs"}
+))
+```
+
+Настройки:
+
+```text
+Visualization: Bar gauge
+Legend: {{host}}
+Type: Instant
+Unit: Percent
+Decimals: 1
+```
+
+Визуально оставлены разные цвета по host для читаемости. Threshold-based coloring можно добавить позже вместе с alert rules; текущий вариант оставлен для читаемого различения host.
+
+#### Web nginx logs
+
+Datasource: `Loki`.
+
+Базовый LogQL:
+
+```logql
+{host="web", job="nginx"}
+```
+
+Для красивого отображения использован вариант с `regexp` и `line_format`:
+
+```logql
+{host="web", job="nginx"}
+| regexp `^(?P<client_ip>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "(?P<method>\S+) (?P<path>\S+) (?P<proto>[^"]+)" (?P<status>\d{3}) (?P<size>\d+) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)"`
+| line_format `{{.method}} {{.path}} → {{.status}} from {{.client_ip}}`
+```
+
+#### App logs
+
+Datasource: `Loki`.
+
+Базовый LogQL:
+
+```logql
+{host="app", job="app"}
+```
+
+Для красивого отображения использован вариант с `regexp` и `line_format`:
+
+```logql
+{host="app", job="app"}
+| regexp `^(?P<ts>\S+ \S+) (?P<level>\S+) service=(?P<service>\S+) method=(?P<method>\S+) path=(?P<path>\S+) status=(?P<status>\d+) client_ip=(?P<client_ip>\S+)`
+| line_format `{{.method}} {{.path}} → {{.status}} from {{.client_ip}}`
+```
+
+### Проверка log panels
+
+Для наполнения log-панелей были сгенерированы свежие запросы:
+
+```bash
+curl http://192.168.85.131/
+curl http://192.168.85.131/not-found-grafana-test
+curl http://192.168.85.133:8080/
+curl http://192.168.85.133:8080/health
+curl http://192.168.85.133:8080/bad-endpoint-grafana-test
+```
+
+После refresh dashboard свежие nginx/app logs появились в соответствующих панелях.

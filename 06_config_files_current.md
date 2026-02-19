@@ -407,3 +407,98 @@ sudo apt-get update
 ```
 
 Директории `/etc/apt/keyrings` и `/etc/apt/sources.list.d` не удалялись.
+
+## Grafana dashboard: Infrastructure Overview
+
+Dashboard создан через Grafana UI. JSON export пока не зафиксирован в sources.
+
+Название:
+
+```text
+Infrastructure Overview
+```
+
+Панели и запросы:
+
+### Targets UP
+
+Datasource: `Prometheus`.
+
+```promql
+up{job="node"}
+```
+
+Настройки:
+
+```text
+Visualization: Stat
+Legend: {{host}}
+Type: Instant
+Value mappings:
+  1 -> UP
+  0 -> DOWN
+```
+
+### CPU Usage by host
+
+Datasource: `Prometheus`.
+
+```promql
+100 - (avg by (host) (rate(node_cpu_seconds_total{job="node", mode="idle"}[5m])) * 100)
+```
+
+### RAM Usage by host
+
+Datasource: `Prometheus`.
+
+```promql
+100 * (1 - (node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}))
+```
+
+### Disk Usage by host
+
+Datasource: `Prometheus`.
+
+```promql
+100 * (1 - (
+  node_filesystem_avail_bytes{job="node", mountpoint="/", fstype!~"tmpfs|overlay|squashfs"}
+  /
+  node_filesystem_size_bytes{job="node", mountpoint="/", fstype!~"tmpfs|overlay|squashfs"}
+))
+```
+
+### Web nginx logs
+
+Datasource: `Loki`.
+
+Базовый запрос:
+
+```logql
+{host="web", job="nginx"}
+```
+
+Красивое отображение:
+
+```logql
+{host="web", job="nginx"}
+| regexp `^(?P<client_ip>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "(?P<method>\S+) (?P<path>\S+) (?P<proto>[^"]+)" (?P<status>\d{3}) (?P<size>\d+) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)"`
+| line_format `{{.method}} {{.path}} → {{.status}} from {{.client_ip}}`
+```
+
+### App logs
+
+Datasource: `Loki`.
+
+Базовый запрос:
+
+```logql
+{host="app", job="app"}
+```
+
+Красивое отображение:
+
+```logql
+{host="app", job="app"}
+| regexp `^(?P<ts>\S+ \S+) (?P<level>\S+) service=(?P<service>\S+) method=(?P<method>\S+) path=(?P<path>\S+) status=(?P<status>\d+) client_ip=(?P<client_ip>\S+)`
+| line_format `{{.method}} {{.path}} → {{.status}} from {{.client_ip}}`
+```
