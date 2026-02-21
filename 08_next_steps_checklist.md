@@ -130,26 +130,31 @@ Promtail сам отправляет logs в Loki на /loki/api/v1/push.
 - [x] Проверить Loki-запрос `{host="app", job="app"}`.
 - [x] Подтверждено: видны app logs с `path=/`, `path=/health`, `path=/bad-endpoint`, `status=200`, `status=404`.
 
-## Текущий следующий этап: Dashboards и alerts
-
-### Dashboards
-
-- [ ] Dashboard Infrastructure Overview.
-- [ ] Dashboard Web.
-- [ ] Dashboard App.
-- [ ] Dashboard Logs.
-- [ ] Alert target down.
-- [ ] Alert app health fail.
-- [ ] Alert disk usage warning.
+## Текущий следующий этап: web/app integration
 
 ### web/app integration
 
-- [ ] Улучшить Python app.
+- [ ] Улучшить Python app при необходимости.
 - [ ] Добавить `/info`.
 - [ ] Добавить `/api/time`.
 - [ ] Настроить Nginx reverse proxy `/api/*` -> `app:8080`.
-- [ ] Обновить frontend-страницу.
+- [ ] Проверить `curl http://192.168.85.131/api/health`.
+- [ ] Обновить frontend-страницу на `web`, чтобы она показывала связь с backend.
 - [ ] Проверить Browser -> web -> app.
+- [ ] Сгенерировать web/app запросы и проверить, что они появились в Grafana dashboard logs panels.
+
+### Dashboards — позже
+
+- [x] Dashboard Infrastructure Overview.
+- [ ] Dashboard Web.
+- [ ] Dashboard App.
+- [ ] Dashboard Logs.
+
+### Alerts — позже, как часть полировки monitoring
+
+- [ ] Alert `TargetDown`: один из Prometheus targets недоступен.
+- [ ] Alert `AppHealthFail`: backend health endpoint недоступен.
+- [ ] Alert `HighDiskUsage`: высокий процент использования диска.
 
 ### Финал
 
@@ -160,3 +165,38 @@ Promtail сам отправляет logs в Loki на /loki/api/v1/push.
 - [ ] Ansible inventory.
 - [ ] Первые playbook'и.
 - [ ] Демонстрационный сценарий.
+
+## Завершено: Grafana dashboard Infrastructure Overview
+
+- [x] Создать dashboard `Infrastructure Overview`.
+- [x] Добавить panel `Targets UP`.
+- [x] PromQL: `up{job="node"}`.
+- [x] Настроить `Legend: {{host}}`.
+- [x] Настроить value mappings: `1 -> UP`, `0 -> DOWN`.
+- [x] Подтверждено: `web`, `app`, `log`, `monitor` отображаются как `UP`.
+- [x] Добавить panel `CPU Usage by host`.
+- [x] PromQL: `100 - (avg by (host) (rate(node_cpu_seconds_total{job="node", mode="idle"}[5m])) * 100)`.
+- [x] Добавить panel `RAM Usage by host`.
+- [x] PromQL: `100 * (1 - (node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}))`.
+- [x] Добавить panel `Disk Usage by host`.
+- [x] PromQL для `/`: `100 * (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes))` с фильтрами `job="node"`, `mountpoint="/"`, `fstype!~"tmpfs|overlay|squashfs"`.
+- [x] Добавить panel `Web nginx logs`.
+- [x] Loki datasource, LogQL: `{host="web", job="nginx"}` с `regexp` и `line_format` для короткого отображения method/path/status/client_ip.
+- [x] Добавить panel `App logs`.
+- [x] Loki datasource, LogQL: `{host="app", job="app"}` с `regexp` и `line_format` для короткого отображения level/method/path/status/client_ip.
+- [x] Сгенерировать свежие web/app запросы через `curl`, чтобы log-панели не были пустыми.
+- [x] Сохранить dashboard.
+
+Итог: первый обзорный dashboard готов. Он показывает состояние всех monitored nodes и свежие web/app logs из Loki.
+
+## Следующий практический этап: web/app integration
+
+- [ ] Настроить Nginx на `web` как reverse proxy для `/api/*` -> `192.168.85.133:8080`.
+- [ ] Проверить конфиг Nginx через `sudo nginx -t`.
+- [ ] Перезагрузить Nginx.
+- [ ] Проверить `curl http://192.168.85.131/api/health`.
+- [ ] Обновить HTML-страницу на `web`, чтобы она демонстрировала связь frontend/backend.
+- [ ] Проверить пользовательский поток Browser -> web -> app.
+- [ ] Проверить, что новые запросы видны в Web nginx logs и App logs на dashboard `Infrastructure Overview`.
+
+Базовые alerts (`TargetDown`, `HighDiskUsage`, позже `AppHealthFail`) перенесены в следующий этап полировки monitoring, после связки `web` и `app`.

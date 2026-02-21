@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "admin/web/app/log completed for logging stage; monitor VM created; Prometheus, Grafana, Alertmanager active/enabled; node_exporter active on monitor/web/app/log; Prometheus targets node (4/4 up) with host labels; Grafana datasources Prometheus and Loki connected and verified",
-  "last_completed_stage": "Grafana datasources: Prometheus and Loki connected and verified in Grafana Explore",
-  "current_next_stage": "Grafana dashboards: create Infrastructure Overview dashboard with node status, CPU/RAM/Disk, and web/app logs panels",
+  "status": "admin/web/app/log completed for logging stage; monitor VM created; Prometheus, Grafana, Alertmanager active/enabled; node_exporter active on monitor/web/app/log; Prometheus targets node (4/4 up) with host labels; Grafana datasources Prometheus and Loki connected and verified; Grafana dashboard Infrastructure Overview created with targets UP, CPU/RAM/Disk by host, web nginx logs and app logs panels",
+  "last_completed_stage": "Grafana dashboard Infrastructure Overview: targets UP, CPU/RAM/Disk by host, web nginx logs and app logs panels created and verified",
+  "current_next_stage": "Web/App integration: connect web and app through Nginx reverse proxy /api/* -> app:8080, update frontend page, verify Browser -> web -> app flow and logs in Grafana",
   "files": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",

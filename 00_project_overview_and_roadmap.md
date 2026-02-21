@@ -36,6 +36,7 @@ Browser -> monitor:3000 Grafana UI                     # реализовано
 web/app/log -> node_exporter:9100 -> Prometheus         # реализовано: node (4/4 up)
 Grafana -> Prometheus:9090                             # реализовано: datasource подключен и проверен
 Grafana -> Loki:3100                                   # реализовано: datasource подключен и проверен
+Grafana dashboard Infrastructure Overview               # реализовано: targets UP, CPU/RAM/Disk, web/app logs
 web:80 -> app:8080 через reverse proxy                 # план
 ```
 
@@ -72,7 +73,7 @@ Backend/application node. Сейчас Python-приложение на стан
 
 ### monitor
 
-Сервер мониторинга, визуализации и алертов. На нем уже установлены Prometheus, Grafana, Alertmanager и node_exporter. Prometheus собирает метрики самого `monitor` и метрики `web`, `app`, `log` через node_exporter. Prometheus показывает `node (4/4 up)`. Grafana подключена к Prometheus и Loki как datasources; следующий шаг — собрать первый dashboard Infrastructure Overview.
+Сервер мониторинга, визуализации и алертов. На нем уже установлены Prometheus, Grafana, Alertmanager и node_exporter. Prometheus собирает метрики самого `monitor` и метрики `web`, `app`, `log` через node_exporter. Prometheus показывает `node (4/4 up)`. Grafana подключена к Prometheus и Loki как datasources. Создан dashboard `Infrastructure Overview` с targets UP, CPU/RAM/Disk по узлам и web/app logs.
 
 ## Что уже сделано
 
@@ -208,6 +209,12 @@ Backend/application node. Сейчас Python-приложение на стан
 - В Grafana добавлен Loki datasource: `http://192.168.85.135:3100`.
 - Loki datasource проверен через `Save & test` и LogQL-запросы `{host="web", job="nginx"}`, `{host="app", job="app"}`.
 - В Grafana Explore подтверждены nginx logs с `web` и app logs с `app`.
+- Создан Grafana dashboard `Infrastructure Overview`.
+- Dashboard показывает `Targets UP` для `web`, `app`, `log`, `monitor`.
+- Dashboard показывает `Disk Usage by host`, `CPU Usage by host`, `RAM Usage by host`.
+- Dashboard показывает `Web nginx logs` из Loki по `{host="web", job="nginx"}`.
+- Dashboard показывает `App logs` из Loki по `{host="app", job="app"}`.
+- Для log-панелей использованы LogQL `regexp` и `line_format`, чтобы строки отображались в коротком читаемом виде: method/path/status/client_ip.
 
 #### Особенность установки Grafana
 
@@ -257,9 +264,29 @@ Promtail сам отправляет logs в Loki на /loki/api/v1/push.
 
 Итог: в Grafana добавлены datasources Prometheus и Loki. Prometheus datasource использует `http://localhost:9090` и проверен запросом `up{job="node"}`: видны `web`, `app`, `log`, `monitor` со значением `1`. Loki datasource использует `http://192.168.85.135:3100` и проверен запросами `{host="web", job="nginx"}` и `{host="app", job="app"}`: видны nginx access logs и app logs.
 
-### Этап 7. Grafana dashboard Infrastructure Overview — текущий следующий этап
+### Этап 7. Grafana dashboard Infrastructure Overview — завершено
 
-Итог: создать первый dashboard в Grafana: статус targets, базовые CPU/RAM/Disk метрики по узлам, panel/links для web/app logs.
+Итог: создан первый dashboard `Infrastructure Overview` в Grafana. Dashboard включает статус targets, базовые CPU/RAM/Disk метрики по узлам, web nginx logs и app logs.
+
+Панели dashboard:
+
+```text
+Targets UP
+Disk Usage by host
+CPU Usage by host
+RAM Usage by host
+Web nginx logs
+App logs
+```
+
+Используемые datasources:
+
+```text
+Prometheus — для up/CPU/RAM/Disk
+Loki — для web/app logs
+```
+
+Для проверки log-панелей были сгенерированы запросы на `web` и `app`, после чего свежие записи появились в Grafana. Логи отображаются в сокращенном читаемом виде через LogQL `regexp` и `line_format`.
 
 ### Этап 8. Интеграция `web` и `app`
 
@@ -271,7 +298,7 @@ Promtail сам отправляет logs в Loki на /loki/api/v1/push.
 
 ### Этап 10. Полировка monitoring
 
-Итог: есть dashboard'ы Infrastructure Overview, Web, App, Logs/Observability; есть базовые alerts: target down, app health fail, disk usage warning.
+Итог: базовый dashboard `Infrastructure Overview` уже создан. Далее нужно добавить отдельные dashboard'ы Web/App/Logs при необходимости и настроить базовые alerts: target down, app health fail, disk usage warning.
 
 ### Этап 11. Полировка Ansible/admin
 
@@ -283,12 +310,40 @@ Promtail сам отправляет logs в Loki на /loki/api/v1/push.
 
 ## Текущий прогресс
 
-Оценка текущего прогресса после завершения Grafana datasources: **85–88% проекта**.
+Оценка текущего прогресса после завершения dashboard Infrastructure Overview: **88–90% проекта**.
 
-Текущий ближайший следующий шаг: **создать первый Grafana dashboard Infrastructure Overview**.
+Текущий ближайший следующий шаг: **Web/App integration — связать `web` и `app` через Nginx reverse proxy `/api/* -> app:8080`**.
 
 Оценка остатка:
 
-- текущий темп: 3–6 дней;
-- ускоренный темп: 2–4 дня;
-- вдумчивая полировка и документация: 6–10 дней.
+- текущий темп: 2–5 дней;
+- ускоренный темп: 1–3 дня;
+- вдумчивая полировка, web/app integration, alerts, Ansible и README: 5–8 дней.
+
+## Обновление после этапа Grafana dashboard Infrastructure Overview
+
+Этап `Grafana dashboard Infrastructure Overview` завершен.
+
+Фактическое состояние:
+
+```text
+Dashboard: Infrastructure Overview
+Grafana: monitor:3000
+Prometheus datasource: http://localhost:9090
+Loki datasource: http://192.168.85.135:3100
+```
+
+Панели dashboard:
+
+```text
+Targets UP
+Disk Usage by host
+CPU Usage by host
+RAM Usage by host
+Web nginx logs
+App logs
+```
+
+Dashboard показывает `web`, `app`, `log`, `monitor`. Метрики берутся из Prometheus, логи берутся из Loki. Для log-панелей применены LogQL `regexp` и `line_format`, чтобы вывод был коротким и читаемым.
+
+Следующий этап: **Web/App integration** — настроить Nginx reverse proxy `/api/* -> app:8080`, обновить frontend-страницу и проверить поток `Browser -> web -> app`. Alerts остаются в более позднем этапе полировки monitoring.
