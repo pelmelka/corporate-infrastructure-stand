@@ -4,17 +4,23 @@
 
 Цель: показать, что frontend, backend, логирование и мониторинг работают вместе.
 
-Шаги:
+Текущий статус: frontend и backend уже работают отдельно, nginx logs и app logs доходят в Loki, Prometheus/Grafana/Alertmanager подняты на `monitor`, dashboard `Infrastructure Overview` создан. Следующий недостающий элемент для полноценного пользовательского сценария — reverse proxy `web -> app`.
+
+Шаги сейчас:
 
 1. Открыть сайт `http://192.168.85.131`.
-2. Проверить backend: `curl http://192.168.85.133:8080/health`.
-3. После reverse proxy проверить `curl http://192.168.85.131/api/health`.
-4. Открыть Grafana.
-5. Показать метрики `web`, `app`, логи nginx и app.
+2. Проверить backend напрямую: `curl http://192.168.85.133:8080/health`.
+3. Открыть Grafana dashboard `Infrastructure Overview`.
+4. Показать `Targets UP`, CPU/RAM/Disk, `Web nginx logs`, `App logs`.
 
-Ожидаемый итог: сайт и backend работают, запросы видны в логах, узлы видны в мониторинге.
+Шаги после web/app integration:
 
-Текущее состояние: frontend и backend уже работают, nginx logs и app logs доходят в Loki. Prometheus, Grafana и Alertmanager на `monitor` подняты. node_exporter работает на `web`, `app`, `log`, `monitor`; Prometheus показывает `node (4/4 up)`. В Grafana подключены datasources Prometheus и Loki; в Explore проверены `up{job="node"}`, `{host="web", job="nginx"}`, `{host="app", job="app"}`. Следующий шаг — собрать dashboard Infrastructure Overview.
+1. Открыть сайт `http://192.168.85.131`.
+2. Проверить backend через web reverse proxy: `curl http://192.168.85.131/api/health`.
+3. Показать, что запросы видны в nginx logs и app logs.
+4. Показать состояние узлов и ресурсов в dashboard `Infrastructure Overview`.
+
+Ожидаемый итог: сайт и backend связаны в один пользовательский поток `Browser -> web -> app`; запросы видны в логах, узлы видны в мониторинге.
 
 ## Сценарий 2. App service down
 
@@ -31,6 +37,12 @@ sudo systemctl start app.service
 curl http://192.168.85.133:8080/health
 ```
 
+После web/app integration дополнительно проверить через `web`:
+
+```bash
+curl http://192.168.85.131/api/health
+```
+
 Ожидаемый итог: видно обнаружение проблемы, диагностика, восстановление и подтверждение восстановления.
 
 Дополнительно после восстановления можно проверить app logs:
@@ -39,7 +51,7 @@ curl http://192.168.85.133:8080/health
 tail -n 20 /var/log/app/app.log
 ```
 
-И в Loki:
+И в Loki/Grafana:
 
 ```text
 {host="app", job="app"}
@@ -52,8 +64,14 @@ tail -n 20 /var/log/app/app.log
 Шаги:
 
 ```bash
-curl http://192.168.85.131
-curl http://192.168.85.131/not-found
+curl http://192.168.85.131/
+curl http://192.168.85.131/not-found-grafana-test
+```
+
+После reverse proxy также:
+
+```bash
+curl http://192.168.85.131/api/health
 ```
 
 Локально это должно попасть в:
@@ -63,13 +81,13 @@ curl http://192.168.85.131/not-found
 /var/log/nginx/error.log
 ```
 
-Promtail отправляет в Loki. В Grafana/Loki искать:
+Promtail отправляет nginx logs в Loki. В Grafana/Loki искать:
 
 ```text
 {host="web", job="nginx"}
 ```
 
-Текущее состояние: этот сценарий уже технически подтвержден через Loki API `query_range`. После генерации запросов Loki вернул nginx access logs с labels `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
+Текущее состояние: сценарий технически подтвержден. Dashboard `Infrastructure Overview` содержит panel `Web nginx logs`, где строки отображаются в сокращенном виде через LogQL `regexp` и `line_format`.
 
 ## Сценарий 4. App logs
 
@@ -80,7 +98,13 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 ```bash
 curl http://192.168.85.133:8080/
 curl http://192.168.85.133:8080/health
-curl http://192.168.85.133:8080/bad-endpoint
+curl http://192.168.85.133:8080/bad-endpoint-grafana-test
+```
+
+После reverse proxy часть запросов будет приходить через `web`:
+
+```bash
+curl http://192.168.85.131/api/health
 ```
 
 Локально это должно попасть в:
@@ -97,13 +121,13 @@ INFO service=python-backend method=GET path=/health status=200 client_ip=...
 WARNING service=python-backend method=GET path=/bad-endpoint status=404 client_ip=...
 ```
 
-Promtail отправляет в Loki. В Grafana/Loki искать:
+Promtail отправляет app logs в Loki. В Grafana/Loki искать:
 
 ```text
 {host="app", job="app"}
 ```
 
-Текущее состояние: этот сценарий уже технически подтвержден через Loki API `query_range`. После генерации запросов Loki вернул app logs с labels `host=app`, `job=app`, `service=python-backend`, `env=lab`, `filename=/var/log/app/app.log`.
+Текущее состояние: сценарий технически подтвержден. Dashboard `Infrastructure Overview` содержит panel `App logs`, где строки отображаются в сокращенном виде через LogQL `regexp` и `line_format`.
 
 ## Сценарий 5. Infrastructure overview
 
@@ -116,11 +140,26 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 - `log` UP;
 - `monitor` UP;
 - CPU/RAM/Disk по каждому узлу;
-- targets Prometheus;
-- статус Loki;
-- последние ошибки из логов.
+- web nginx logs;
+- app logs.
 
-Текущее состояние: база готова. `monitor`, Prometheus, Grafana, Alertmanager и node_exporter на всех monitored nodes уже подняты. Prometheus показывает `node (4/4 up)`. Prometheus и Loki datasources в Grafana уже подключены и проверены. Для полноценного Infrastructure Overview осталось создать/импортировать Grafana dashboard.
+Текущее состояние: dashboard `Infrastructure Overview` создан и сохранен в Grafana. Он использует Prometheus datasource для `Targets UP`, CPU, RAM, Disk и Loki datasource для `Web nginx logs`, `App logs`.
+
+Для наполнения log-панелей свежими событиями можно выполнить:
+
+```bash
+curl http://192.168.85.131/
+curl http://192.168.85.131/not-found-grafana-test
+curl http://192.168.85.133:8080/
+curl http://192.168.85.133:8080/health
+curl http://192.168.85.133:8080/bad-endpoint-grafana-test
+```
+
+После web/app integration дополнительно:
+
+```bash
+curl http://192.168.85.131/api/health
+```
 
 ## Сценарий 6. Recovery story
 
@@ -129,9 +168,9 @@ Promtail отправляет в Loki. В Grafana/Loki искать:
 Последовательность:
 
 1. Создать проблему: остановить `app.service`, сломать nginx config или остановить promtail.
-2. Посмотреть симптомы: curl, Grafana, Prometheus, Loki logs.
-3. Найти причину: systemctl, journalctl, Grafana logs.
+2. Посмотреть симптомы: curl, Grafana dashboard, Prometheus targets, Loki logs.
+3. Найти причину: `systemctl`, `journalctl`, локальные logs, Grafana logs panels.
 4. Исправить.
 5. Проверить восстановление.
 
-Текущее состояние: базовая часть для recovery уже есть — `app.service`, `promtail.service`, `loki.service`, nginx logs, app logs, Prometheus, Grafana и Alertmanager. В Grafana уже подключены Prometheus и Loki datasources, поэтому демонстрация через метрики и логи технически возможна в Grafana Explore. Для красивой демонстрации осталось создать dashboard.
+Текущее состояние: базовая часть для recovery уже есть — `app.service`, `promtail.service`, `loki.service`, nginx logs, app logs, Prometheus, Grafana, Alertmanager и dashboard `Infrastructure Overview`. После web/app integration recovery-сценарий станет нагляднее, потому что можно будет показать отказ backend через пользовательский путь `Browser -> web -> app`.
