@@ -194,7 +194,10 @@
 - Prometheus query `up{job="node"}` показывает `web`, `app`, `log`, `monitor` со значением `1`;
 - Loki datasource: `Save & test` успешен;
 - LogQL `{host="web", job="nginx"}` показывает nginx logs;
-- LogQL `{host="app", job="app"}` показывает app logs.
+- LogQL `{host="app", job="app"}` показывает app logs;
+- создан dashboard `Infrastructure Overview`;
+- dashboard показывает `Targets UP`, `Disk Usage by host`, `CPU Usage by host`, `RAM Usage by host`, `Web nginx logs`, `App logs`;
+- для web/app log panels используются LogQL `regexp` и `line_format`, чтобы строки отображались в коротком читаемом виде.
 
 Особенность установки: официальный Grafana APT/download был недоступен из текущей сети/маршрута:
 
@@ -299,9 +302,25 @@ sudo systemctl reset-failed openipmi.service
 
 После этого `openipmi.service` не должен мешать проверкам `systemctl list-units --type=service --state=failed`.
 
-## Планируемые dashboard'ы
+## Dashboard'ы
+
+### Создано
 
 - Infrastructure Overview
+
+Состав `Infrastructure Overview`:
+
+```text
+Targets UP
+Disk Usage by host
+CPU Usage by host
+RAM Usage by host
+Web nginx logs
+App logs
+```
+
+### Планируется позже
+
 - Web Node Dashboard
 - App Node Dashboard
 - Logs / Observability
@@ -322,4 +341,28 @@ sudo systemctl reset-failed openipmi.service
 2. App down: остановить `app.service`, увидеть ошибку, поднять обратно.
 3. Web logs: сгенерировать HTTP-запросы и увидеть nginx logs в Loki.
 4. App logs: сгенерировать HTTP-запросы и увидеть app logs в Loki.
-5. Infrastructure overview: показать состояние всех узлов. База для этого готова: Prometheus видит node targets `4/4 up`.
+5. Infrastructure overview: показать состояние всех узлов. Dashboard `Infrastructure Overview` создан; Prometheus видит node targets `4/4 up`, а Grafana показывает UP/CPU/RAM/Disk и web/app logs.
+
+## Обновление: Grafana dashboard Infrastructure Overview
+
+Dashboard `Infrastructure Overview` создан на `monitor` в Grafana.
+
+Используемые источники данных:
+
+```text
+Prometheus: up, CPU, RAM, Disk
+Loki: web nginx logs, app logs
+```
+
+Панели:
+
+```text
+Targets UP
+Disk Usage by host
+CPU Usage by host
+RAM Usage by host
+Web nginx logs
+App logs
+```
+
+Назначение: быстрый обзор состояния всех monitored nodes и свежих логов web/app.
