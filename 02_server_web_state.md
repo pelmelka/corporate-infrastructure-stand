@@ -4,69 +4,52 @@
 
 `web` — frontend / Nginx server.
 
-Роль: отдавать веб-страницу, позже проксировать запросы к `app`, писать access/error логи, отправлять логи в Loki через Promtail, отдавать системные метрики через node_exporter.
+Роль:
+
+- отдавать frontend Mini Support Desk;
+- принимать пользовательские HTTP-запросы;
+- проксировать `/api/*` на `app:8080`;
+- писать nginx access/error logs;
+- отправлять nginx logs в Loki через Promtail;
+- отдавать системные метрики через node_exporter.
 
 ## Основная информация
 
 - Hostname: `web`
 - OS: Debian GNU/Linux 13 (trixie)
-- Kernel: Linux 6.12.74+deb13+1-amd64
-- Virtualization: KVM
 - IP: `192.168.85.131/24`
 - Interface: `ens18`
 - User: `pelmel`
-- sudo: работает
-- SSH: работает
-- Nginx: работает
-- Promtail: установлен и работает как `systemd` service
-- node_exporter: установлен и работает как `systemd` service
-
-## SSH и sudo
-
-`ssh.service` работает, включен в автозапуск, порт 22 слушается. `sudo whoami` возвращает `root`.
+- SSH/sudo: работают
+- Nginx: `active/enabled`
+- Promtail: `active/enabled`
+- node_exporter: `active/enabled`
 
 ## Nginx
 
-Nginx установлен и запущен.
+Сервис:
+
+```text
+nginx.service
+```
 
 Проверки:
 
 ```bash
 systemctl status nginx --no-pager
+sudo nginx -t
 ss -tulpn | grep :80
-curl http://localhost
+curl http://localhost/
 ```
 
-Состояние:
+Подтверждено:
 
-- `nginx.service`: `active (running)`
-- `nginx.service`: `enabled`
-- порт `80`: слушается
-- порт `9100`: слушается node_exporter
-- `curl http://localhost`: возвращает пользовательский HTML
+- `nginx.service active (running)`;
+- порт `80` слушается;
+- `sudo nginx -t` успешен;
+- frontend Mini Support Desk отдается с `web`.
 
-## Конфигурация Nginx
-
-Файл:
-
-```text
-/etc/nginx/sites-available/default
-```
-
-Важные строки:
-
-```nginx
-root /var/www/html;
-index index.html index.htm index.nginx-debian.html;
-server_name _;
-location / {
-    try_files $uri $uri/ =404;
-}
-```
-
-Nginx берет сайт из `/var/www/html` и первым ищет `index.html`.
-
-## HTML-страница
+## Frontend Mini Support Desk
 
 Файл:
 
@@ -74,23 +57,70 @@ Nginx берет сайт из `/var/www/html` и первым ищет `index.h
 /var/www/html/index.html
 ```
 
-Текущее содержимое:
+Backup перед изменением:
 
-```html
-<!doctype html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Web node</title>
-</head>
-<body>
-    <h1>web server is working</h1>
-    <p>Mini Corporate Infrastructure Lab</p>
-</body>
-</html>
+```text
+/var/www/html/index.html.bak-before-supportdesk
 ```
 
-Файл `/var/www/html/index.nginx-debian.html` остался, но не мешает, потому что `index.html` имеет приоритет.
+Функциональность страницы:
+
+- показывает backend status через `GET /api/health`;
+- показывает список заявок через `GET /api/tickets`;
+- создает заявку через `POST /api/tickets`;
+- меняет статус заявки через `PATCH /api/tickets/<id>/status`;
+- показывает Last API response;
+- отображает backend UTC time и local browser time.
+
+Полный текущий код `index.html` фиксируется в `06_config_files_current.md`, а не дублируется здесь.
+
+## Nginx reverse proxy
+
+Файл:
+
+```text
+/etc/nginx/sites-available/default
+```
+
+Backup перед изменением:
+
+```text
+/etc/nginx/sites-available/default.bak-before-supportdesk-proxy
+```
+
+Важный блок:
+
+```nginx
+location /api/ {
+    proxy_pass http://192.168.85.133:8080/;
+
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Смысл mapping:
+
+```text
+/api/health              -> app:/health
+/api/tickets             -> app:/tickets
+/api/tickets/<id>/status -> app:/tickets/<id>/status
+/api/metrics             -> app:/metrics
+```
+
+Проверки:
+
+```bash
+curl -s http://localhost/api/health | python3 -m json.tool
+curl -s http://localhost/api/tickets | python3 -m json.tool
+curl -s http://192.168.85.131/api/health | python3 -m json.tool
+```
+
+Результат: `support-desk-api` отвечает через `web` reverse proxy.
 
 ## Nginx logs
 
@@ -101,185 +131,38 @@ Nginx берет сайт из `/var/www/html` и первым ищет `index.h
 /var/log/nginx/error.log
 ```
 
-Права на момент настройки:
+После Mini Support Desk flow подтверждены строки вида:
 
 ```text
--rw-r----- 1 www-data adm ... access.log
--rw-r----- 1 www-data adm ... error.log
+GET /api/health HTTP/1.1 200
+GET /api/tickets HTTP/1.1 200
+POST /api/tickets HTTP/1.1 201
+PATCH /api/tickets/6/status HTTP/1.1 200
 ```
 
-Пользователь `promtail` добавлен в группу `adm`, поэтому может читать nginx-логи.
-
-Проверка:
-
-```bash
-sudo -u promtail test -r /var/log/nginx/access.log && echo "access.log readable"
-sudo -u promtail test -r /var/log/nginx/error.log && echo "error.log readable"
-```
-
-Результат:
+Promtail читает `/var/log/nginx/*.log` и отправляет logs в Loki с labels:
 
 ```text
-access.log readable
-error.log readable
+host=web
+job=nginx
+service=frontend
+env=lab
 ```
 
-## Promtail
+## Proxy headers
 
-Promtail установлен вручную как бинарник.
-
-Версия:
-
-```bash
-/opt/promtail/promtail --version
-```
-
-Результат:
+Nginx передает в backend:
 
 ```text
-promtail, version 3.5.0
-branch: k248
-revision: 4b16bc4f
-go version: go1.24.1
-platform: linux/amd64
-tags: promtail_journal_enabled
+Host
+X-Real-IP
+X-Forwarded-For
+X-Forwarded-Proto
 ```
 
-Пользователь:
-
-```bash
-id promtail
-```
-
-Результат:
-
-```text
-uid=988(promtail) gid=988(promtail) groups=988(promtail),4(adm)
-```
-
-Директории:
-
-```text
-/opt/promtail
-/etc/promtail
-/var/lib/promtail
-```
-
-Назначение:
-
-- `/opt/promtail` — бинарник;
-- `/etc/promtail` — конфиг;
-- `/var/lib/promtail` — positions-файл, то есть служебное состояние чтения логов.
-
-## Promtail config
-
-Файл:
-
-```text
-/etc/promtail/config.yml
-```
-
-Содержимое:
-
-```yaml
-server:
-  http_listen_port: 9080
-  grpc_listen_port: 0
-
-positions:
-  filename: /var/lib/promtail/positions.yaml
-
-clients:
-  - url: http://192.168.85.135:3100/loki/api/v1/push
-
-scrape_configs:
-  - job_name: nginx
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          host: web
-          job: nginx
-          service: frontend
-          env: lab
-          __path__: /var/log/nginx/*.log
-```
-
-Права:
-
-```bash
-sudo chown promtail:promtail /etc/promtail/config.yml
-sudo chmod 640 /etc/promtail/config.yml
-```
-
-## Promtail systemd service
-
-Файл:
-
-```text
-/etc/systemd/system/promtail.service
-```
-
-Содержимое:
-
-```ini
-[Unit]
-Description=Promtail Log Shipping Agent
-After=network.target
-
-[Service]
-User=promtail
-Group=promtail
-ExecStart=/opt/promtail/promtail -config.file=/etc/promtail/config.yml
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Команды применения:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now promtail.service
-```
-
-Проверки:
-
-```bash
-systemctl status promtail.service --no-pager
-ss -tulpn | grep :9080
-sudo journalctl -u promtail.service -n 30 --no-pager
-systemctl is-enabled promtail.service
-systemctl is-active promtail.service
-```
-
-Подтверждено:
-
-```text
-promtail.service active (running)
-promtail.service enabled
-порт 9080 LISTEN
-Promtail начал читать /var/log/nginx/access.log
-Promtail начал читать /var/log/nginx/error.log
-```
-
-В `journalctl` были важные строки:
-
-```text
-tail routine: started path=/var/log/nginx/access.log
-tail routine: started path=/var/log/nginx/error.log
-```
-
+Сейчас `app` логирует TCP peer как `client_ip`, поэтому в app logs виден `client_ip=192.168.85.131`. Улучшение логирования `x_real_ip` и `x_forwarded_for` вынесено в future backlog.
 
 ## node_exporter
-
-`node_exporter` установлен из Debian-пакета:
-
-```text
-prometheus-node-exporter
-```
 
 Сервис:
 
@@ -287,128 +170,18 @@ prometheus-node-exporter
 prometheus-node-exporter.service
 ```
 
-Проверки на `web`:
-
-```bash
-systemctl status prometheus-node-exporter --no-pager
-systemctl is-enabled prometheus-node-exporter
-systemctl is-active prometheus-node-exporter
-ss -tulpn | grep :9100
-curl -s http://localhost:9100/metrics | head
-```
-
 Подтверждено:
 
-```text
-prometheus-node-exporter.service active (running)
-prometheus-node-exporter.service enabled
-порт 9100 LISTEN
-/metrics возвращает системные метрики
-```
+- active/enabled;
+- порт `9100` слушается;
+- Prometheus видит target `host="web"`.
 
-Проверка с `monitor`:
+## Текущий статус
 
-```bash
-curl -s http://192.168.85.131:9100/metrics | head
-```
+`web` считается готовым frontend/reverse proxy node для Mini Support Desk:
 
-Результат: `monitor` получает метрики с `web`.
-
-В Prometheus target добавлен как:
-
-```text
-instance="192.168.85.131:9100"
-host="web"
-job="node"
-```
-
-## Проверка доставки nginx logs в Loki
-
-Сгенерированы запросы на `web`:
-
-```bash
-curl http://localhost/
-curl http://localhost/not-found-promtail-test
-curl http://localhost/
-```
-
-Локально они появились в:
-
-```bash
-sudo tail -n 10 /var/log/nginx/access.log
-```
-
-Примеры строк:
-
-```text
-::1 - - [26/Apr/2026:20:47:00 +0300] "GET / HTTP/1.1" 200 188 "-" "curl/8.14.1"
-::1 - - [26/Apr/2026:20:47:17 +0300] "GET /not-found-promtail-test HTTP/1.1" 404 146 "-" "curl/8.14.1"
-::1 - - [26/Apr/2026:20:47:33 +0300] "GET / HTTP/1.1" 200 188 "-" "curl/8.14.1"
-```
-
-Проверка Loki через `query_range`:
-
-```bash
-START=$(date -d '15 minutes ago' +%s%N)
-END=$(date +%s%N)
-
-curl -G -s "http://192.168.85.135:3100/loki/api/v1/query_range"   --data-urlencode 'query={host="web",job="nginx"}'   --data-urlencode "start=$START"   --data-urlencode "end=$END"   --data-urlencode 'limit=10'   --data-urlencode 'direction=backward' | python3 -m json.tool
-```
-
-Результат:
-
-- Loki вернул `"status": "success"`;
-- найден stream с labels `host="web"`, `job="nginx"`, `service="frontend"`, `env="lab"`;
-- в `values` были строки `GET / HTTP/1.1` и `GET /not-found-promtail-test HTTP/1.1`.
-
-## Важное замечание про `/loki/api/v1/push`
-
-Адрес:
-
-```text
-http://192.168.85.135:3100/loki/api/v1/push
-```
-
-не является веб-страницей для браузера. Это API endpoint для POST-запросов от Promtail. При открытии в браузере может быть `HTTP ERROR 405`, и это нормально: браузер делает GET-запрос, а endpoint `/push` предназначен для отправки логов методом POST.
-
-Для проверки доступности Loki использовать:
-
-```bash
-curl http://192.168.85.135:3100/ready
-```
-
-Для чтения логов использовать:
-
-```text
-/loki/api/v1/query_range
-```
-
-а не `/loki/api/v1/query`, потому что обычные log queries должны выполняться как range query.
-
-## Проверка с admin
-
-```bash
-curl http://192.168.85.131
-```
-
-Результат: пользовательская страница `web server is working`.
-
-## Статус
-
-`web` считается **готовым frontend node с отправкой nginx logs в Loki**.
-
-Готово:
-
-- Nginx работает;
-- HTML-страница отдается;
-- nginx access/error logs существуют;
-- Promtail установлен;
-- node_exporter установлен;
-- `promtail.service` active/enabled;
-- `prometheus-node-exporter.service` active/enabled;
-- Promtail читает `/var/log/nginx/*.log`;
-- Promtail отправляет nginx logs в Loki на `log`;
-- Loki query_range возвращает nginx access logs с labels `host=web`, `job=nginx`, `service=frontend`, `env=lab`;
-- Prometheus видит системные метрики `web` через `192.168.85.131:9100` с label `host="web"`.
-
-Осталось: более осмысленная страница, reverse proxy к `app`, подключение datasource/dashboard в Grafana.
+- Nginx отдает frontend;
+- `/api/*` проксируется на `app:8080`;
+- Browser -> web -> app flow подтвержден;
+- nginx logs уходят в Loki;
+- системные метрики доступны Prometheus через node_exporter.

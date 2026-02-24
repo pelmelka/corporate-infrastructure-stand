@@ -12,46 +12,16 @@
 
 Proxmox и все VM сейчас находятся в этой сети через bridge `vmbr0`.
 
-## Proxmox
-
-- Web UI: `https://192.168.85.128:8006`
-- IP: `192.168.85.128/24`
-- Gateway: `192.168.85.2`
-- Bridge: `vmbr0`
-- Port: `ens33`
-
 ## IP-адреса
 
 | Сервер | IP | Назначение | Статус IP |
 |---|---:|---|---|
 | Proxmox | 192.168.85.128 | гипервизор | зафиксирован на Proxmox |
 | admin | 192.168.85.129 | control node | DHCP сейчас держится стабильно |
-| web | 192.168.85.131 | nginx frontend | DHCP сейчас держится стабильно |
-| app | 192.168.85.133 | python backend | DHCP сейчас держится стабильно |
+| web | 192.168.85.131 | nginx frontend/reverse proxy | DHCP сейчас держится стабильно |
+| app | 192.168.85.133 | support-desk-api backend | DHCP сейчас держится стабильно |
 | log | 192.168.85.135 | Loki logging | DHCP сейчас держится стабильно |
 | monitor | 192.168.85.137 | Prometheus/Grafana/Alertmanager | DHCP сейчас держится стабильно |
-
-## Важное замечание про DHCP/static
-
-На текущем этапе VM получают IP через DHCP VMware NAT. В lab-режиме это работает стабильно, потому что VMware NAT обычно выдает адрес “липко” по MAC-адресу VM.
-
-Но для более правильной и воспроизводимой инфраструктуры позже нужно сделать одно из двух:
-
-```text
-1. DHCP reservation по MAC-адресам всех VM;
-2. статические IP внутри Debian на всех серверах.
-```
-
-Это важно, потому что в проекте уже есть зависимости от IP:
-
-```text
-Promtail на web/app -> Loki 192.168.85.135:3100
-Grafana -> Prometheus 192.168.85.137:9090
-Grafana -> Loki 192.168.85.135:3100
-Prometheus -> node_exporter targets на web/app/log/monitor
-Ansible inventory -> IP всех узлов
-будущий reverse proxy web -> app 192.168.85.133:8080
-```
 
 ## Gateway/DNS
 
@@ -68,107 +38,106 @@ Windows VMware NAT adapter:
 VMnet8 host adapter: 192.168.85.1
 ```
 
+## Важное замечание про DHCP/static
+
+Сейчас VM получают IP через DHCP VMware NAT. Для более воспроизводимой инфраструктуры позже нужно сделать DHCP reservation по MAC или статические IP внутри Debian.
+
 ## Порты
 
 ```text
 Proxmox: 8006/tcp
 admin:   22/tcp
 web:     22/tcp, 80/tcp, 9080/tcp Promtail, 9100/tcp node_exporter
-app:     22/tcp, 8080/tcp, 9080/tcp Promtail, 9100/tcp node_exporter
+app:     22/tcp, 8080/tcp support-desk-api, 9080/tcp Promtail, 9100/tcp node_exporter
 log:     22/tcp, 3100/tcp Loki HTTP, 9095/tcp Loki gRPC, 9100/tcp node_exporter
 monitor: 22/tcp, 3000/tcp Grafana, 9090/tcp Prometheus, 9093/tcp Alertmanager, 9100/tcp node_exporter
+Windows host: 10802/tcp portproxy для будущего Telegram bot outbound proxy
 ```
 
-## Проверки связности
+## Web/App integration network flow
 
-`monitor -> Loki`:
+Реализован поток:
+
+```text
+Browser/Windows -> web 192.168.85.131:80
+web/Nginx -> app 192.168.85.133:8080
+```
+
+Внешние URL:
+
+```text
+http://192.168.85.131/
+http://192.168.85.131/api/health
+http://192.168.85.131/api/tickets
+```
+
+Reverse proxy:
+
+```text
+/api/* -> http://192.168.85.133:8080/
+```
+
+Важно: в app logs `client_ip=192.168.85.131`, потому что backend видит Nginx reverse proxy как TCP-клиента. Обработка `X-Real-IP` и `X-Forwarded-For` вынесена в future backlog.
+
+## Проверки Web/App связности
+
+С `web`:
 
 ```bash
-curl http://192.168.85.135:3100/ready
+curl http://192.168.85.133:8080/health
+curl http://localhost/api/health
+curl http://192.168.85.131/api/health
+```
+
+Подтверждено: `support-desk-api` отвечает напрямую и через reverse proxy.
+
+## Telegram bot outbound proxy workaround
+
+Для будущего Telegram support bot проверен исходящий доступ с VM `app` к Telegram API через Windows proxy.
+
+Проблема:
+
+- `app` напрямую не могла подключиться к `https://api.telegram.org`;
+- Invisible Man XRay на Windows слушал только `127.0.0.1:10801`, что недоступно из VM.
+
+Решение:
+
+```text
+Windows portproxy:
+192.168.85.1:10802 -> 127.0.0.1:10801
+```
+
+Команды на Windows cmd от администратора:
+
+```cmd
+netsh interface portproxy add v4tov4 listenaddress=192.168.85.1 listenport=10802 connectaddress=127.0.0.1 connectport=10801
+netsh advfirewall firewall add rule name="Allow VM to XRay proxy 10802" dir=in action=allow protocol=TCP localip=192.168.85.1 localport=10802 remoteip=192.168.85.0/24
+```
+
+Проверка с `app`:
+
+```bash
+nc -vzn 192.168.85.1 10802
+curl -x http://192.168.85.1:10802 -I https://api.telegram.org
 ```
 
 Результат:
 
 ```text
-ready
+nc -> open
+curl через proxy -> HTTP response от Telegram
 ```
 
-`monitor -> admin/web/app/log`:
+Будущий env для `support-bot.service`:
 
 ```bash
-ping 192.168.85.129
-ping 192.168.85.131
-ping 192.168.85.133
-ping 192.168.85.135
+HTTP_PROXY=http://192.168.85.1:10802
+HTTPS_PROXY=http://192.168.85.1:10802
+NO_PROXY=localhost,127.0.0.1,192.168.85.0/24
 ```
 
-Результат: связность есть.
-
-
-## Проверки node_exporter с monitor
-
-`monitor` успешно получает системные метрики со всех node_exporter endpoints:
-
-```bash
-curl -s http://localhost:9100/metrics | head
-curl -s http://192.168.85.131:9100/metrics | head
-curl -s http://192.168.85.133:9100/metrics | head
-curl -s http://192.168.85.135:9100/metrics | head
-```
-
-Prometheus UI показывает:
-
-```text
-prometheus (1/1 up)
-node (4/4 up)
-```
-
-Targets:
-
-```text
-monitor: localhost:9100, host="monitor"
-web:     192.168.85.131:9100, host="web"
-app:     192.168.85.133:9100, host="app"
-log:     192.168.85.135:9100, host="log"
-```
-
-## Доступ с Windows
-
-Prometheus:
-
-```text
-http://192.168.85.137:9090
-```
-
-Grafana:
-
-```text
-http://192.168.85.137:3000
-```
-
-Alertmanager:
-
-```text
-http://192.168.85.137:9093
-```
-
-Важно: Debian-пакет Alertmanager не включает полноценный web UI, поэтому по `:9093` показывается простая HTML-страница с API/health links.
+Webhook для Telegram в текущей NAT-инфраструктуре не выбирается. Реалистичный вариант: long polling + outbound proxy.
 
 ## VPN issue
 
-При включенном VPNKA/VPN доступ к Proxmox `https://192.168.85.128:8006` с Windows не работает.
-
-Текущее практическое решение:
-
-```text
-Для работы с Proxmox локально отключать VPN.
-```
-
-Для скачивания Grafana `.deb` может понадобиться другой интернет/VPN. Если VPN ломает доступ к VM, лучше:
-
-```text
-1. скачать .deb на Windows через доступный маршрут;
-2. выключить VPN;
-3. передать .deb на monitor через scp;
-4. установить локально.
-```
+При включенном VPNKA/VPN доступ к Proxmox `https://192.168.85.128:8006` с Windows не работает. Практическое решение: для работы с Proxmox локально отключать VPN.
