@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "admin/web/app/log completed for logging stage; monitor VM created; Prometheus, Grafana, Alertmanager active/enabled; node_exporter active on monitor/web/app/log; Prometheus targets node (4/4 up) with host labels; Grafana datasources Prometheus and Loki connected and verified; Grafana dashboard Infrastructure Overview created with targets UP, CPU/RAM/Disk by host, web nginx logs and app logs panels",
-  "last_completed_stage": "Grafana dashboard Infrastructure Overview: targets UP, CPU/RAM/Disk by host, web nginx logs and app logs panels created and verified",
-  "current_next_stage": "Web/App integration: connect web and app through Nginx reverse proxy /api/* -> app:8080, update frontend page, verify Browser -> web -> app flow and logs in Grafana",
+  "status": "Web/App integration completed with Mini Support Desk product. web serves frontend and proxies /api/* to app:8080. app runs support-desk-api with tickets.json, product logs and manual /metrics. Loki/Grafana sees support-desk-api product logs. Future improvements centralized in 12_future_improvements_backlog.md.",
+  "last_completed_stage": "Web/App integration: Mini Support Desk frontend on web, support-desk-api backend on app, Nginx reverse proxy /api/* -> app:8080, Browser -> web -> app flow verified, product logs visible in Loki/Grafana",
+  "current_next_stage": "Logging polish: finalize support-desk-api product logs, update Loki/LogQL display for event logs, handle X-Forwarded-For/original client IP and status unchanged behavior. Roadmap keeps stages 1-12 plus optional Telegram bot.",
   "files": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",
@@ -16,6 +16,8 @@
     "08_next_steps_checklist.md",
     "09_demo_scenarios.md",
     "10_interaction_guide.md",
-    "11_server_monitor_state.md"
-  ]
+    "11_server_monitor_state.md",
+    "12_future_improvements_backlog.md"
+  ],
+  "progress_estimate": "engineering readiness 92-94%; demo readiness 90-92%; 8/12 main roadmap stages completed"
 }
