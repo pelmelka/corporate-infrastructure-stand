@@ -4,37 +4,28 @@
 
 `app` — backend/application server.
 
-Роль: запускать Python-приложение, отвечать на HTTP-запросы, работать как `systemd` service, быть backend'ом для будущего reverse proxy на `web`, писать application logs и отправлять их в Loki через Promtail.
+Роль:
+
+- запускать Python backend `support-desk-api`;
+- обрабатывать API Mini Support Desk;
+- хранить заявки в lab storage `/opt/app/tickets.json`;
+- писать product logs в `/var/log/app/app.log`;
+- отдавать product metrics на `/metrics`;
+- работать как `systemd` service;
+- отправлять app logs в Loki через Promtail;
+- отдавать системные метрики через node_exporter.
 
 ## Основная информация
 
 - Hostname: `app`
 - OS: Debian GNU/Linux 13 (trixie)
-- Kernel: Linux 6.12.74+deb13+1-amd64
-- Virtualization: KVM
 - IP: `192.168.85.133/24`
 - Interface: `ens18`
-- Default gateway: `192.168.85.2`
 - User: `pelmel`
-- sudo: работает
-- SSH: работает
-- App service: работает
-- Promtail: установлен и работает как `systemd` service
-- node_exporter: установлен и работает как `systemd` service
-
-## Сеть
-
-```text
-interface: ens18
-inet: 192.168.85.133/24
-default via 192.168.85.2 dev ens18
-```
-
-DNS работает, `ping deb.debian.org` проходит.
-
-## SSH и sudo
-
-SSH работает и включен. `sudo whoami` возвращает `root`.
+- SSH/sudo: работают
+- App service: `active/enabled`
+- Promtail: `active/enabled`
+- node_exporter: `active/enabled`
 
 ## Директория приложения
 
@@ -42,122 +33,90 @@ SSH работает и включен. `sudo whoami` возвращает `root
 /opt/app
 ```
 
-Владелец должен быть `pelmel:pelmel`. `/opt` остается `root:root`.
+Важные файлы:
+
+```text
+/opt/app/app.py
+/opt/app/app.py.bak-before-supportdesk
+/opt/app/app.py.bak-before-logging
+/opt/app/tickets.json
+```
+
+Полный текущий код `app.py` фиксируется в `06_config_files_current.md`, а не дублируется здесь.
 
 ## Python-приложение
+
+Текущая роль приложения: backend API продукта Mini Support Desk.
+
+Приложение:
+
+- слушает `0.0.0.0:8080`;
+- работает через `app.service`;
+- возвращает API-ответы преимущественно в JSON;
+- хранит заявки в `/opt/app/tickets.json`;
+- пишет product logs в `/var/log/app/app.log`;
+- отдает product metrics на `/metrics` в Prometheus text format.
+
+Endpoints:
+
+```text
+GET    /health
+GET    /tickets
+POST   /tickets
+GET    /tickets/<id>
+PATCH  /tickets/<id>/status
+GET    /metrics
+```
+
+## Data storage
+
+Текущий lab storage:
+
+```text
+/opt/app/tickets.json
+```
+
+Это простое файловое хранилище для учебного этапа. Замена на PostgreSQL вынесена в `12_future_improvements_backlog.md`.
+
+## Product logs
 
 Файл:
 
 ```text
-/opt/app/app.py
-```
-
-Текущая логика:
-
-- слушает `0.0.0.0:8080`;
-- `/` возвращает `app server is working`;
-- `/health` возвращает `{"status": "ok"}`;
-- остальные пути возвращают `404 not found`;
-- пишет application logs в `/var/log/app/app.log`.
-
-Текущий код:
-
-```python
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
-import logging
-
-HOST = "0.0.0.0"
-PORT = 8080
-LOG_FILE = "/var/log/app/app.log"
-
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s service=python-backend %(message)s",
-)
-
-
-class AppHandler(BaseHTTPRequestHandler):
-    def write_response(self, status_code, content_type, body):
-        self.send_response(status_code)
-        self.send_header("Content-Type", content_type)
-        self.end_headers()
-        self.wfile.write(body)
-
-        level = logging.WARNING if status_code >= 400 else logging.INFO
-        logging.log(
-            level,
-            "method=GET path=%s status=%s client_ip=%s",
-            self.path,
-            status_code,
-            self.client_address[0],
-        )
-
-    def do_GET(self):
-        if self.path == "/":
-            self.write_response(
-                200,
-                "text/plain; charset=utf-8",
-                b"app server is working\n",
-            )
-        elif self.path == "/health":
-            self.write_response(
-                200,
-                "application/json",
-                json.dumps({"status": "ok"}).encode(),
-            )
-        else:
-            self.write_response(
-                404,
-                "text/plain; charset=utf-8",
-                b"not found\n",
-            )
-
-    def log_message(self, format, *args):
-        return
-
-
-if __name__ == "__main__":
-    server = HTTPServer((HOST, PORT), AppHandler)
-    server.serve_forever()
-```
-
-Перед изменением приложения был создан backup:
-
-```text
-/opt/app/app.py.bak-before-logging
-```
-
-## App logs
-
-Созданы:
-
-```text
-/var/log/app
 /var/log/app/app.log
 ```
 
-Права:
+Текущий формат: `key=value`.
+
+Примеры новых product logs:
 
 ```text
-drwxr-x--- 2 pelmel adm ... /var/log/app
--rw-r----- 1 pelmel adm ... /var/log/app/app.log
+service=support-desk-api event=ticket_created method=POST path=/tickets status=201 client_ip=192.168.85.131 ticket_id=6 priority=high source=web
+service=support-desk-api event=ticket_status_changed method=PATCH path=/tickets/6/status status=200 client_ip=192.168.85.131 ticket_id=6 old_status=in_progress new_status=resolved source=web
+service=support-desk-api event=ticket_list_requested method=GET path=/tickets status=200 client_ip=192.168.85.131 count=6
+service=support-desk-api event=health_check method=GET path=/health status=200 client_ip=192.168.85.131
 ```
 
-Назначение:
+Важно: `client_ip=192.168.85.131` нормально после reverse proxy, потому что для backend TCP-клиентом является Nginx на `web`. Future improvement: добавить отдельные поля `x_real_ip` и `x_forwarded_for`, не заменяя `client_ip`.
 
-- `pelmel` может писать в `app.log`, потому что `app.service` запускается от пользователя `pelmel`;
-- группа `adm` может читать `app.log`, поэтому пользователь `promtail`, добавленный в `adm`, может читать application logs;
-- остальные пользователи доступа не имеют.
+## Product metrics
 
-Примеры строк в `/var/log/app/app.log`:
+Endpoint:
 
 ```text
-2026-04-27 02:06:36,931 INFO service=python-backend method=GET path=/ status=200 client_ip=127.0.0.1
-2026-04-27 02:06:45,581 INFO service=python-backend method=GET path=/health status=200 client_ip=127.0.0.1
-2026-04-27 02:06:56,160 WARNING service=python-backend method=GET path=/bad-endpoint status=404 client_ip=127.0.0.1
+GET /metrics
 ```
+
+Текущие метрики:
+
+```text
+supportdesk_tickets_total
+supportdesk_tickets_open
+supportdesk_tickets_in_progress
+supportdesk_tickets_resolved
+```
+
+Сейчас `/metrics` реализован вручную в `app.py`. Переход на Prometheus client library и расширенные метрики вынесен в `12_future_improvements_backlog.md`.
 
 ## systemd unit приложения
 
@@ -167,354 +126,68 @@ drwxr-x--- 2 pelmel adm ... /var/log/app
 /etc/systemd/system/app.service
 ```
 
-Содержимое:
+Сервис работает как:
 
-```ini
-[Unit]
-Description=Simple Python App Service
-After=network.target
-
-[Service]
+```text
 User=pelmel
 WorkingDirectory=/opt/app
 ExecStart=/usr/bin/python3 /opt/app/app.py
 Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Сервис: `enabled`, `active (running)`, порт `8080` слушается, процесс идет от пользователя `pelmel`.
-
-## Проверки приложения
-
-На `app`:
-
-```bash
-systemctl status app.service --no-pager
-curl http://localhost:8080/
-curl http://localhost:8080/health
-curl http://localhost:8080/bad-endpoint
-tail -n 20 /var/log/app/app.log
-```
-
-Получено:
-
-```text
-app.service active (running)
-/ -> app server is working
-/health -> {"status": "ok"}
-/bad-endpoint -> not found
-```
-
-В `app.log` появились строки с `INFO` для `200` и `WARNING` для `404`.
-
-С `admin` ранее проверялось:
-
-```bash
-curl http://192.168.85.133:8080
-curl http://192.168.85.133:8080/health
-```
-
-Результаты успешные.
-
-## Promtail
-
-Promtail установлен вручную как бинарник.
-
-Версия:
-
-```bash
-/opt/promtail/promtail --version
-```
-
-Результат:
-
-```text
-promtail, version 3.5.0
-branch: k248
-revision: 4b16bc4f
-go version: go1.24.1
-platform: linux/amd64
-tags: promtail_journal_enabled
-```
-
-Пользователь:
-
-```bash
-id promtail
-```
-
-Результат:
-
-```text
-uid=988(promtail) gid=988(promtail) groups=988(promtail),4(adm)
-```
-
-Проверка чтения app log:
-
-```bash
-sudo -u promtail test -r /var/log/app/app.log && echo "app.log readable"
-```
-
-Результат:
-
-```text
-app.log readable
-```
-
-Директории:
-
-```text
-/opt/promtail
-/etc/promtail
-/var/lib/promtail
-```
-
-Назначение:
-
-- `/opt/promtail` — бинарник;
-- `/etc/promtail` — конфиг;
-- `/var/lib/promtail` — positions-файл, то есть служебное состояние чтения логов.
-
-## Promtail config
-
-Файл:
-
-```text
-/etc/promtail/config.yml
-```
-
-Содержимое:
-
-```yaml
-server:
-  http_listen_port: 9080
-  grpc_listen_port: 0
-
-positions:
-  filename: /var/lib/promtail/positions.yaml
-
-clients:
-  - url: http://192.168.85.135:3100/loki/api/v1/push
-
-scrape_configs:
-  - job_name: app
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          host: app
-          job: app
-          service: python-backend
-          env: lab
-          __path__: /var/log/app/*.log
-```
-
-Права:
-
-```bash
-sudo chown promtail:promtail /etc/promtail/config.yml
-sudo chmod 640 /etc/promtail/config.yml
-```
-
-Проверка синтаксиса:
-
-```bash
-sudo -u promtail /opt/promtail/promtail -config.file=/etc/promtail/config.yml -check-syntax
-```
-
-Результат:
-
-```text
-Valid config file! No syntax issues found
-```
-
-## Promtail systemd service
-
-Файл:
-
-```text
-/etc/systemd/system/promtail.service
-```
-
-Содержимое:
-
-```ini
-[Unit]
-Description=Promtail Log Shipping Agent
-After=network.target
-
-[Service]
-User=promtail
-Group=promtail
-ExecStart=/opt/promtail/promtail -config.file=/etc/promtail/config.yml
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Команды применения:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now promtail.service
 ```
 
 Проверки:
 
 ```bash
-systemctl status promtail.service --no-pager
-ss -tulpn | grep :9080
-sudo journalctl -u promtail.service -n 30 --no-pager
+systemctl status app.service --no-pager
+curl http://localhost:8080/health
+curl http://localhost:8080/tickets
+curl http://localhost:8080/metrics
 ```
 
 Подтверждено:
 
+- `app.service active (running)`;
+- `/health` возвращает `support-desk-api` JSON;
+- `/tickets` возвращает список заявок;
+- `/metrics` возвращает product metrics;
+- `/opt/app/tickets.json` существует и хранит заявки.
+
+## Promtail
+
+Promtail читает:
+
 ```text
-promtail.service active (running)
-promtail.service enabled
-порт 9080 LISTEN
-Promtail добавил target /var/log/app/*.log
-Promtail начал следить за /var/log/app
-Promtail начал читать /var/log/app/app.log
+/var/log/app/*.log
 ```
 
-В `journalctl` были важные строки:
+и отправляет logs в Loki:
 
 ```text
-Adding target key="/var/log/app/*.log:{env=\"lab\", host=\"app\", job=\"app\", service=\"python-backend\"}"
-watching new directory directory=/var/log/app
-tail routine: started path=/var/log/app/app.log
+http://192.168.85.135:3100/loki/api/v1/push
 ```
 
-Предупреждение `enable watchConfig` было замечено, но не критично: сервис работает.
+Promtail labels сейчас:
 
+```text
+host=app
+job=app
+service=python-backend
+env=lab
+```
+
+Примечание: внутри log line приложение уже пишет `service=support-desk-api`. Обновление Promtail label `service` можно рассмотреть на этапе Полировка logging.
 
 ## node_exporter
 
-`node_exporter` установлен из Debian-пакета:
-
-```text
-prometheus-node-exporter
-```
-
-Сервис:
-
-```text
-prometheus-node-exporter.service
-```
-
-Проверки на `app`:
-
-```bash
-systemctl status prometheus-node-exporter --no-pager
-systemctl is-enabled prometheus-node-exporter
-systemctl is-active prometheus-node-exporter
-ss -tulpn | grep :9100
-curl -s http://localhost:9100/metrics | head
-```
-
-Подтверждено:
-
-```text
-prometheus-node-exporter.service active (running)
-prometheus-node-exporter.service enabled
-порт 9100 LISTEN
-/metrics возвращает системные метрики
-```
-
-Проверка с `monitor`:
-
-```bash
-curl -s http://192.168.85.133:9100/metrics | head
-```
-
-Результат: `monitor` получает метрики с `app`.
-
-В Prometheus target добавлен как:
-
-```text
-instance="192.168.85.133:9100"
-host="app"
-job="node"
-```
-
-Примечание: предупреждение `curl: (23) Failure writing output to destination` при использовании `curl | head` не является проблемой node_exporter. `head` закрывает pipe после первых строк, а `curl` еще пытается писать дальше.
-
-## Проверка доставки app logs в Loki
-
-Сгенерированы запросы на `app`:
-
-```bash
-curl http://localhost:8080/
-curl http://localhost:8080/health
-curl http://localhost:8080/bad-endpoint
-```
-
-Локально они появились в:
-
-```bash
-tail -n 20 /var/log/app/app.log
-```
-
-Проверка Loki через `query_range`:
-
-```bash
-START=$(date -d '15 minutes ago' +%s%N)
-END=$(date +%s%N)
-
-curl -G -s "http://192.168.85.135:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={host="app",job="app"}' \
-  --data-urlencode "start=$START" \
-  --data-urlencode "end=$END" \
-  --data-urlencode 'limit=20' \
-  --data-urlencode 'direction=backward' | python3 -m json.tool
-```
-
-Результат:
-
-- Loki вернул `"status": "success"`;
-- `resultType`: `streams`;
-- найдены stream'ы с labels `host="app"`, `job="app"`, `service="python-backend"`, `env="lab"`;
-- `filename="/var/log/app/app.log"`;
-- в `values` есть строки `path=/`, `path=/health`, `path=/bad-endpoint`, `status=200`, `status=404`.
-
-Дополнительно Loki/Promtail добавил `detected_level`:
-
-```text
-detected_level="info"
-detected_level="warn"
-```
-
-Это нормально: строки `INFO` и `WARNING` попали в разные stream'ы по обнаруженному уровню.
+`prometheus-node-exporter.service` active/enabled, порт `9100` слушается. Prometheus видит target `host="app"`.
 
 ## Текущий статус
 
-`app` считается **готовым backend node с отправкой app logs в Loki**.
+`app` считается готовым backend node для Mini Support Desk:
 
-Готово:
-
-- Python-приложение работает;
-- `app.service` active/enabled;
-- приложение пишет полезные логи в `/var/log/app/app.log`;
-- Promtail 3.5.0 установлен;
-- node_exporter установлен;
-- пользователь `promtail` создан и добавлен в `adm`;
-- `promtail.service` active/enabled;
-- `prometheus-node-exporter.service` active/enabled;
-- Promtail читает `/var/log/app/*.log`;
-- Promtail отправляет app logs в Loki на `http://192.168.85.135:3100/loki/api/v1/push`;
-- Loki query_range возвращает app logs с labels `host=app`, `job=app`, `service=python-backend`, `env=lab`;
-- Prometheus видит системные метрики `app` через `192.168.85.133:9100` с label `host="app"`.
-
-## Следующий шаг
-
-Следующий этап: **Grafana datasources и dashboard**:
-
-- подключить Prometheus datasource в Grafana;
-- подключить Loki datasource в Grafana;
-- проверить query `up{job="node"}`;
-- проверить Loki-запросы `{host="web",job="nginx"}` и `{host="app",job="app"}`.
+- `support-desk-api` работает;
+- tickets create/list/status flow подтвержден;
+- product logs пишутся;
+- product metrics доступны на `/metrics`;
+- app logs доходят в Loki/Grafana;
+- системные метрики доступны Prometheus через node_exporter.
