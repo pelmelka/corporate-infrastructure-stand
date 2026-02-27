@@ -112,12 +112,12 @@ scrape_configs:
         labels:
           host: app
           job: app
-          service: python-backend
+          service: support-desk-api
           env: lab
           __path__: /var/log/app/*.log
 ```
 
-Примечание: после Web/App integration приложение пишет внутри log line `service=support-desk-api`. Обновление Promtail label `service` можно рассмотреть на этапе Полировка logging.
+Примечание: после logging polish Promtail label для app приведен к актуальному значению `service=support-desk-api`. Старые строки в Loki могут оставаться с label `service=python-backend`, новые идут с новым label.
 
 ## Prometheus config
 
@@ -136,7 +136,14 @@ alerting:
       - targets: ['localhost:9093']
 ```
 
-Текущий node targets block:
+Текущий `rule_files` block:
+
+```yaml
+rule_files:
+  - /etc/prometheus/supportdesk.rules.yml
+```
+
+Текущий `scrape_configs` block:
 
 ```yaml
 scrape_configs:
@@ -157,9 +164,80 @@ scrape_configs:
       - targets: ['192.168.85.135:9100']
         labels:
           host: log
+
+  - job_name: supportdesk-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['192.168.85.133:8080']
+        labels:
+          host: app
+          service: support-desk-api
+          env: lab
 ```
 
-App `/metrics` scrape пока не добавлен. Это задача этапа Полировка monitoring.
+App `/metrics` scrape добавлен и проверен: target `supportdesk-api` показывает `1/1 up`.
+
+## Prometheus alert rules
+
+Файл:
+
+```text
+monitor: /etc/prometheus/supportdesk.rules.yml
+```
+
+Полный текущий вариант:
+
+```yaml
+groups:
+  - name: supportdesk.rules
+    rules:
+      - alert: SupportDeskApiDown
+        expr: up{job="supportdesk-api"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: support-desk-api
+        annotations:
+          summary: "SupportDesk API is down"
+          description: "Prometheus cannot scrape supportdesk-api on {{ $labels.instance }} for more than 30 seconds."
+
+      - alert: TooManyOpenTickets
+        expr: supportdesk_tickets_open{job="supportdesk-api"} >= 3
+        for: 30s
+        labels:
+          severity: warning
+          service: support-desk-api
+        annotations:
+          summary: "Too many open support tickets"
+          description: "There are {{ $value }} open support tickets in Mini Support Desk."
+
+      - alert: HighDiskUsage
+        expr: 100 * (1 - (node_filesystem_avail_bytes{job="node", mountpoint="/", fstype="ext4"} / node_filesystem_size_bytes{job="node", mountpoint="/", fstype="ext4"})) > 80
+        for: 2m
+        labels:
+          severity: warning
+          service: node
+        annotations:
+          summary: "High disk usage on {{ $labels.host }}"
+          description: "Root filesystem on {{ $labels.host }} is {{ printf \"%.1f\" $value }}% full."
+
+      - alert: NodeTargetDown
+        expr: up{job="node"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: node
+        annotations:
+          summary: "Node target is down: {{ $labels.host }}"
+          description: "Prometheus cannot scrape node_exporter on {{ $labels.host }} at {{ $labels.instance }} for more than 30 seconds."
+```
+
+Проверено:
+
+- `SupportDeskApiDown` срабатывает при остановке `app.service`;
+- `TooManyOpenTickets` срабатывает при `supportdesk_tickets_open >= 3`;
+- `HighDiskUsage` проверен временным порогом `>20`, затем возвращен на `>80`;
+- `NodeTargetDown` срабатывает при остановке node_exporter на target node.
 
 ## Alertmanager
 
@@ -204,17 +282,41 @@ Targets UP
 Disk Usage by host
 CPU Usage by host
 RAM Usage by host
+SupportDesk API UP
+SupportDesk Tickets
+Active Alerts
 Web nginx logs
 App logs
 ```
 
-Новый product logs query, проверенный в Grafana Explore:
+Product/API panels:
 
-```logql
-{host="app", job="app"} |= "support-desk-api"
+```promql
+up{job="supportdesk-api"}
 ```
 
-Красивое форматирование App logs под новый `event=...` формат будет делаться на этапе Полировка logging.
+```promql
+supportdesk_tickets_total{job="supportdesk-api"}
+supportdesk_tickets_open{job="supportdesk-api"}
+supportdesk_tickets_in_progress{job="supportdesk-api"}
+supportdesk_tickets_resolved{job="supportdesk-api"}
+```
+
+Active Alerts panel:
+
+```promql
+sum(ALERTS{alertstate="firing"}) or vector(0)
+```
+
+App logs panel query:
+
+```logql
+{host="app", job="app", service="support-desk-api"}
+| logfmt
+| line_format "{{.event}} | {{.method}} {{.path}} | status={{.status}} | ticket={{.ticket_id}} | {{.old_status}} -> {{.new_status}} | client={{.x_forwarded_for}} | proxy={{.client_ip}}"
+```
+
+Примечание: после подключения Prometheus scrape в App logs появляются `metrics_requested | GET /metrics`; это ожидаемый шум от мониторинга и пока оставлено без изменений.
 
 ## Nginx reverse proxy для Mini Support Desk
 
@@ -642,6 +744,7 @@ Backup:
 
 ```text
 app: /opt/app/app.py.bak-before-supportdesk
+/opt/app/app.py.bak-before-logging-polish
 ```
 
 Данные:
@@ -776,18 +879,35 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
         raw_body = self.rfile.read(length)
         return json.loads(raw_body.decode("utf-8"))
 
+    def clean_log_value(self, value):
+        if value is None or value == "":
+            return "-"
+        return (
+            str(value)
+            .replace("\\", "\\\\")
+            .replace("\n", "_")
+            .replace("\r", "_")
+            .replace("\t", "_")
+            .replace(" ", "_")
+        )
+
     def log_event(self, level, event, status_code, **fields):
+        client_ip = self.client_address[0]
+        x_forwarded_for = self.headers.get("X-Forwarded-For", "-")
+        x_forwarded_proto = self.headers.get("X-Forwarded-Proto", "-")
+
         parts = [
             f"event={event}",
             f"method={self.command}",
             f"path={self.path}",
             f"status={status_code}",
-            f"client_ip={self.client_address[0]}",
+            f"client_ip={self.clean_log_value(client_ip)}",
+            f"x_forwarded_for={self.clean_log_value(x_forwarded_for)}",
+            f"x_forwarded_proto={self.clean_log_value(x_forwarded_proto)}",
         ]
 
         for key, value in fields.items():
-            safe_value = str(value).replace(" ", "_")
-            parts.append(f"{key}={safe_value}")
+            parts.append(f"{key}={self.clean_log_value(value)}")
 
         logging.log(level, " ".join(parts))
 
@@ -987,6 +1107,20 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                 return
 
             old_status = ticket["status"]
+
+            if old_status == new_status:
+                self.send_json(200, ticket)
+                self.log_event(
+                    logging.INFO,
+                    "ticket_status_unchanged",
+                    200,
+                    ticket_id=ticket_id,
+                    old_status=old_status,
+                    new_status=new_status,
+                    source=source,
+                )
+                return
+
             ticket["status"] = new_status
             ticket["updated_at"] = now_iso()
             save_tickets(tickets)

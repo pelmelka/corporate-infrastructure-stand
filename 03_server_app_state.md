@@ -39,6 +39,7 @@
 /opt/app/app.py
 /opt/app/app.py.bak-before-supportdesk
 /opt/app/app.py.bak-before-logging
+/opt/app/app.py.bak-before-logging-polish
 /opt/app/tickets.json
 ```
 
@@ -76,7 +77,7 @@ GET    /metrics
 /opt/app/tickets.json
 ```
 
-Это простое файловое хранилище для учебного этапа. Замена на PostgreSQL вынесена в `12_future_improvements_backlog.md`.
+Это простое файловое хранилище для учебного этапа. Замена на PostgreSQL вынесена в roadmap/future improvements.
 
 ## Product logs
 
@@ -86,18 +87,61 @@ GET    /metrics
 /var/log/app/app.log
 ```
 
-Текущий формат: `key=value`.
+Текущий формат: `key=value`, совместимый с LogQL `logfmt`.
 
-Примеры новых product logs:
+Текущие поля product logs:
 
 ```text
-service=support-desk-api event=ticket_created method=POST path=/tickets status=201 client_ip=192.168.85.131 ticket_id=6 priority=high source=web
-service=support-desk-api event=ticket_status_changed method=PATCH path=/tickets/6/status status=200 client_ip=192.168.85.131 ticket_id=6 old_status=in_progress new_status=resolved source=web
-service=support-desk-api event=ticket_list_requested method=GET path=/tickets status=200 client_ip=192.168.85.131 count=6
-service=support-desk-api event=health_check method=GET path=/health status=200 client_ip=192.168.85.131
+service=support-desk-api
+level через стандартный logging format
+event
+method
+path
+status
+client_ip
+x_forwarded_for
+x_forwarded_proto
+ticket_id / priority / source / old_status / new_status / reason / count при необходимости
 ```
 
-Важно: `client_ip=192.168.85.131` нормально после reverse proxy, потому что для backend TCP-клиентом является Nginx на `web`. Future improvement: добавить отдельные поля `x_real_ip` и `x_forwarded_for`, не заменяя `client_ip`.
+Логика IP-полей:
+
+```text
+client_ip        = TCP peer для backend-а; обычно web/Nginx: 192.168.85.131
+x_forwarded_for  = исходный клиент до Nginx; обычно Windows/Browser: 192.168.85.1
+x_forwarded_proto = схема исходного запроса; сейчас http
+```
+
+`x_real_ip` сознательно не логируется, потому что в текущей single-proxy схеме он дублирует `x_forwarded_for`. Nginx может продолжать передавать `X-Real-IP`, но app logs используют только `x_forwarded_for` как более полезное proxy metadata.
+
+Примеры product logs:
+
+```text
+service=support-desk-api event=ticket_created method=POST path=/tickets status=201 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=8 priority=high source=web
+service=support-desk-api event=ticket_status_changed method=PATCH path=/tickets/8/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=8 old_status=open new_status=in_progress source=web
+service=support-desk-api event=ticket_status_unchanged method=PATCH path=/tickets/8/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=8 old_status=in_progress new_status=in_progress source=web
+service=support-desk-api event=ticket_validation_failed method=POST path=/tickets status=400 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http reason=missing_title source=web
+service=support-desk-api event=ticket_not_found method=GET path=/tickets/999999 status=404 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=999999
+service=support-desk-api event=endpoint_not_found method=GET path=/bad-endpoint status=404 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http
+```
+
+Подтвержденные события:
+
+```text
+event=health_check
+event=ticket_list_requested
+event=ticket_detail_requested
+event=ticket_created
+event=ticket_status_changed
+event=ticket_status_unchanged
+event=ticket_validation_failed
+event=ticket_not_found
+event=endpoint_not_found
+event=metrics_requested
+event=internal_error
+```
+
+Примечание: после подключения Prometheus scrape для app `/metrics` в logs регулярно появляются `event=metrics_requested` от `monitor` (`client_ip=192.168.85.137`). Это ожидаемо и пока оставлено как есть.
 
 ## Product metrics
 
@@ -116,7 +160,17 @@ supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
 ```
 
-Сейчас `/metrics` реализован вручную в `app.py`. Переход на Prometheus client library и расширенные метрики вынесен в `12_future_improvements_backlog.md`.
+Prometheus на `monitor` собирает эти метрики отдельным scrape job:
+
+```text
+job="supportdesk-api"
+instance="192.168.85.133:8080"
+host="app"
+service="support-desk-api"
+env="lab"
+```
+
+Сейчас `/metrics` реализован вручную в `app.py`. Переход на Prometheus client library и расширенные request/error/latency metrics вынесен в roadmap/future improvements.
 
 ## systemd unit приложения
 
@@ -150,7 +204,8 @@ curl http://localhost:8080/metrics
 - `/health` возвращает `support-desk-api` JSON;
 - `/tickets` возвращает список заявок;
 - `/metrics` возвращает product metrics;
-- `/opt/app/tickets.json` существует и хранит заявки.
+- `/opt/app/tickets.json` существует и хранит заявки;
+- при остановке `app.service` alert `SupportDeskApiDown` переходит в `FIRING`.
 
 ## Promtail
 
@@ -166,20 +221,22 @@ Promtail читает:
 http://192.168.85.135:3100/loki/api/v1/push
 ```
 
-Promtail labels сейчас:
+Текущие Promtail labels:
 
 ```text
 host=app
 job=app
-service=python-backend
+service=support-desk-api
 env=lab
 ```
 
-Примечание: внутри log line приложение уже пишет `service=support-desk-api`. Обновление Promtail label `service` можно рассмотреть на этапе Полировка logging.
+Старые logs в Loki могут оставаться с label `service=python-backend`; новые logs после logging polish идут с `service=support-desk-api`.
 
 ## node_exporter
 
 `prometheus-node-exporter.service` active/enabled, порт `9100` слушается. Prometheus видит target `host="app"`.
+
+При остановке node_exporter на `app` должен срабатывать alert `NodeTargetDown`.
 
 ## Текущий статус
 
@@ -187,7 +244,7 @@ env=lab
 
 - `support-desk-api` работает;
 - tickets create/list/status flow подтвержден;
-- product logs пишутся;
-- product metrics доступны на `/metrics`;
-- app logs доходят в Loki/Grafana;
+- product logs пишутся и доходят в Loki/Grafana;
+- product metrics доступны на `/metrics` и собираются Prometheus;
+- alerts по app/API проверены;
 - системные метрики доступны Prometheus через node_exporter.

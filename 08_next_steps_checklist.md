@@ -1,6 +1,6 @@
 # Чек-лист следующих шагов
 
-## Завершено: logging stage
+## Завершено: logging base
 
 - [x] Loki 3.5.0 установлен на `log`.
 - [x] `loki.service` active/enabled.
@@ -50,49 +50,121 @@
 - [x] Проверены `/health`, `/tickets`, `POST /tickets`, `PATCH /tickets/<id>/status`, `/metrics`.
 - [x] Создан `/opt/app/tickets.json`.
 - [x] App пишет product logs `service=support-desk-api event=...`.
-- [x] На `web` создан backup `/etc/nginx/sites-available/default.bak-before-supportdesk-proxy`.
-- [x] Настроен Nginx reverse proxy `/api/* -> http://192.168.85.133:8080/`.
-- [x] Проверен `sudo nginx -t`.
-- [x] Выполнен `sudo systemctl reload nginx`.
-- [x] На `web` создан backup `/var/www/html/index.html.bak-before-supportdesk`.
-- [x] HTML-страница заменена на Mini Support Desk frontend.
+- [x] На `web` настроен Nginx reverse proxy `/api/* -> http://192.168.85.133:8080/`.
+- [x] На `web` заменен frontend на Mini Support Desk.
 - [x] Browser -> web -> app flow подтвержден.
 - [x] Через браузер создана тестовая заявка.
 - [x] Через браузер изменен статус заявки.
 - [x] `nginx access.log` показывает `GET/POST/PATCH /api/*`.
-- [x] `app.log` показывает `ticket_created`, `ticket_status_changed`, `ticket_list_requested`, `health_check`.
-- [x] Grafana Explore/Loki видит новые product logs запросом `{host="app", job="app"} |= "support-desk-api"`.
+- [x] `app.log` показывает product events.
+- [x] Grafana Explore/Loki видит product logs.
 
-## Текущий следующий этап: Полировка logging
+## Завершено: Полировка logging
 
-- [ ] Финализировать формат product logs.
-- [ ] Обновить LogQL для App logs под формат `event=...`.
-- [ ] Проверить удобные Loki-запросы по `ticket_created`, `ticket_status_changed`, `ticket_validation_failed`.
-- [ ] Решить поведение `old_status == new_status`.
-- [ ] Улучшить логирование proxy metadata: `client_ip`, `x_real_ip`, `x_forwarded_for`.
-- [ ] Рассмотреть переход app logs с key=value на structured JSON logs.
-- [ ] Рассмотреть обновление Promtail label `service` с `python-backend` на `support-desk-api`.
+- [x] Финализирован формат product logs в `key=value` формате.
+- [x] Добавлен `clean_log_value()`.
+- [x] `client_ip` оставлен как TCP peer backend-а.
+- [x] Добавлены `x_forwarded_for` и `x_forwarded_proto`.
+- [x] `x_real_ip` сознательно не логируется, чтобы не дублировать `x_forwarded_for` в текущей схеме.
+- [x] `old_status == new_status` пишет `event=ticket_status_unchanged`.
+- [x] Реальные изменения статуса пишут `event=ticket_status_changed`.
+- [x] Подтверждены `ticket_validation_failed`, `ticket_not_found`, `endpoint_not_found`.
+- [x] App logs panel в Grafana обновлена под `event=...` формат.
+- [x] Promtail label на `app` изменен с `service=python-backend` на `service=support-desk-api`.
+- [x] Новые logs доступны по LogQL `{host="app", job="app", service="support-desk-api"}`.
 
-## Следующий этап: Полировка monitoring
+## Завершено: Полировка monitoring
 
-- [ ] Добавить Prometheus scrape для `app:/metrics`.
-- [ ] Сделать panels по product metrics.
-- [ ] Рассмотреть переход с ручного `/metrics` на Prometheus client library.
-- [ ] Добавить product alerts и infrastructure alerts.
+- [x] Проверен доступ `monitor -> app:8080/metrics`.
+- [x] В Prometheus добавлен scrape job `supportdesk-api`.
+- [x] Target `supportdesk-api` показывает `1/1 up`.
+- [x] Prometheus видит `supportdesk_tickets_total`, `supportdesk_tickets_open`, `supportdesk_tickets_in_progress`, `supportdesk_tickets_resolved`.
+- [x] В Grafana добавлена panel `SupportDesk Tickets`.
+- [x] В Grafana добавлена panel `SupportDesk API UP`.
+- [x] В Grafana добавлена panel `Active Alerts`.
+- [x] Создан `/etc/prometheus/supportdesk.rules.yml`.
+- [x] В `prometheus.yml` подключен `rule_files` для `supportdesk.rules.yml`.
+- [x] Alert `SupportDeskApiDown` добавлен и протестирован.
+- [x] Alert `TooManyOpenTickets` добавлен и протестирован.
+- [x] Alert `HighDiskUsage` добавлен и протестирован через временный порог.
+- [x] Alert `NodeTargetDown` добавлен и протестирован.
+- [x] Проверено, что Alertmanager получает alert через `amtool`.
 
-## Позже: Ansible/admin polish
+## Текущий следующий этап: Admin/Ansible foundation
 
-- [ ] Раскатать SSH-ключи с `admin`.
-- [ ] Расширить Ansible inventory.
-- [ ] Создать первые playbook'и.
+- [ ] Раскатать SSH-ключи с `admin` на `web`, `app`, `log`, `monitor`.
+- [ ] Расширить Ansible inventory всеми узлами.
+- [ ] Проверить `ansible all -m ping`.
+- [ ] Создать структуру `~/control-node`: `inventory/`, `playbooks/`, `roles/`, `templates/`, `files/`, `docs/`.
+- [ ] Добавить `ansible.cfg`.
+- [ ] Инициализировать Git.
+- [ ] Создать первые playbook'и: `ping_all.yml`, `check_services.yml`, `restart_app.yml`, `deploy_prometheus_rules.yml`.
 
-## Позже: финальная документация
+## Далее: Product model v2
 
-- [ ] README.
-- [ ] IP/порты/сервисы.
-- [ ] Команды проверки.
-- [ ] Snapshots.
-- [ ] Демонстрационный сценарий.
+- [ ] Заменить/дополнить `Title` на `Resource` dropdown.
+- [ ] Добавить `Category` dropdown.
+- [ ] Добавить поля `resource`, `category`, `resolved_at` в ticket model.
+- [ ] Сделать active/resolved разделение заявок.
+- [ ] Сделать так, чтобы resolved-заявки исчезали из active list, но сохранялись в истории.
+- [ ] Подготовить переход к `/api/v1/*`.
+
+## Далее: Product observability v2
+
+- [ ] Добавить metrics by resource/category/priority/source.
+- [ ] Добавить panels по resource/category.
+- [ ] Добавить `SupportDeskTooManyTicketsForResource`.
+- [ ] Добавить `SupportDeskCategoryIncident`.
+- [ ] Добавить `SupportDeskCriticalTicketsOpen`.
+
+## Далее: HTTP/request observability
+
+- [ ] Перейти на Prometheus client library или расширить ручной `/metrics`.
+- [ ] Добавить `supportdesk_requests_total{method,path,status}`.
+- [ ] Добавить `supportdesk_errors_total{status}`.
+- [ ] Добавить `supportdesk_request_duration_seconds`.
+- [ ] Добавить HTTP status / error-rate alerts.
+
+## Далее: Dockerization
+
+- [ ] Создать Dockerfile для `support-desk-api`.
+- [ ] Создать `docker-compose.yml` на `app`.
+- [ ] Оставить внешний порт `8080`.
+- [ ] Сохранить app logs через volume `/var/log/app/app.log`.
+- [ ] Проверить, что Nginx, Prometheus и Promtail продолжают работать без изменения внешнего flow.
+- [ ] Позже контейнеризировать `support-bot`.
+
+## Далее: PostgreSQL / DB
+
+- [ ] Создать отдельную VM `db`.
+- [ ] Установить PostgreSQL.
+- [ ] Создать DB/user/schema.
+- [ ] Перевести app storage с `/opt/app/tickets.json` на PostgreSQL.
+- [ ] Добавить DB env-файл для app.
+- [ ] Добавить postgres_exporter.
+- [ ] Добавить DB alerts.
+- [ ] Добавить backup/restore через `pg_dump`.
+
+## Далее: Telegram support bot
+
+- [ ] Реализовать `support-bot` через long polling.
+- [ ] Использовать Windows portproxy workaround для Telegram API.
+- [ ] Хранить bot token в env-файле.
+- [ ] Создавать/читать/закрывать tickets через тот же app API.
+- [ ] Писать `source=telegram`.
+- [ ] Отправлять bot logs в Loki.
+
+## Далее: hardening и финализация
+
+- [ ] Ограничить прямой доступ к `app:8080`.
+- [ ] Ограничить прямой доступ к `db:5432`.
+- [ ] Добавить Nginx hardening.
+- [ ] Добавить HTTPS/self-signed cert или local CA.
+- [ ] Сделать DHCP reservation или static IP.
+- [ ] Автоматизировать новую архитектуру через Ansible.
+- [ ] Собрать финальный README.
+- [ ] Подготовить screenshots и demo сценарии.
+- [ ] Сделать Proxmox snapshots.
 
 ## Future backlog
 
