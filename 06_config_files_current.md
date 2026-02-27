@@ -1,5 +1,7 @@
 # Важные текущие конфигурационные файлы проекта
 
+Этот файл хранит именно текущие важные конфиги и полный код, который нужен для восстановления состояния. Server state files фиксируют состояние, проверки, paths и роли компонентов, но не полный код.
+
 ## Ansible inventory
 
 Файл:
@@ -61,8 +63,6 @@ memberlist:
   advertise_addr: 127.0.0.1
 ```
 
-Причина: без этих строк Loki 3.5.0 после reboot пытался найти `eth0/en0`, которых нет на Debian VM, где интерфейс называется `ens18`.
-
 ## Promtail config для web
 
 Файл:
@@ -117,6 +117,8 @@ scrape_configs:
           __path__: /var/log/app/*.log
 ```
 
+Примечание: после Web/App integration приложение пишет внутри log line `service=support-desk-api`. Обновление Promtail label `service` можно рассмотреть на этапе Полировка logging.
+
 ## Prometheus config
 
 Файл:
@@ -125,7 +127,7 @@ scrape_configs:
 monitor: /etc/prometheus/prometheus.yml
 ```
 
-Проверенный фрагмент Alertmanager:
+Проверенный Alertmanager block:
 
 ```yaml
 alerting:
@@ -134,39 +136,7 @@ alerting:
       - targets: ['localhost:9093']
 ```
 
-Проверка:
-
-```bash
-curl -s http://localhost:9090/api/v1/alertmanagers | python3 -m json.tool
-```
-
-Результат:
-
-```json
-{
-    "status": "success",
-    "data": {
-        "activeAlertmanagers": [
-            {
-                "url": "http://localhost:9093/api/v2/alerts"
-            }
-        ],
-        "droppedAlertmanagers": []
-    }
-}
-```
-
-Prometheus видит targets:
-
-```text
-job="prometheus", instance="localhost:9090"
-job="node", instance="localhost:9100", host="monitor"
-job="node", instance="192.168.85.131:9100", host="web"
-job="node", instance="192.168.85.133:9100", host="app"
-job="node", instance="192.168.85.135:9100", host="log"
-```
-
-Текущий фрагмент node targets после установки node_exporter на `web`, `app`, `log`:
+Текущий node targets block:
 
 ```yaml
 scrape_configs:
@@ -189,144 +159,9 @@ scrape_configs:
           host: log
 ```
 
-Проверка:
-
-```bash
-promtool check config /etc/prometheus/prometheus.yml
-sudo systemctl reload prometheus
-curl -G -s "http://localhost:9090/api/v1/query"   --data-urlencode 'query=up{job="node"}' | python3 -m json.tool
-```
-
-Подтверждено:
-
-```text
-prometheus (1/1 up)
-node (4/4 up)
-```
-
-Важно: `instance` остается техническим адресом target, а `host` — человекопонятной меткой сервера.
-
-## Grafana
-
-Grafana установлена на `monitor` через локальный `.deb`.
-
-Сервис:
-
-```text
-monitor: grafana-server.service
-```
-
-Проверки:
-
-```bash
-systemctl is-enabled grafana-server
-systemctl is-active grafana-server
-ss -tulpn | grep :3000
-curl -I http://localhost:3000
-```
-
-Подтверждено:
-
-```text
-enabled
-active
-*:3000 LISTEN
-HTTP/1.1 302 Found
-Location: /login
-```
-
-UI:
-
-```text
-http://192.168.85.137:3000
-```
-
-### Grafana datasources
-
-Datasources добавлены через Grafana UI и проверены в Explore.
-
-Prometheus datasource:
-
-```text
-Name: Prometheus
-URL:  http://localhost:9090
-```
-
-Почему `localhost`: Grafana и Prometheus находятся на одном сервере `monitor`, поэтому для Grafana Prometheus доступен локально.
-
-Проверки в Grafana:
-
-```text
-Save & test -> Successfully queried the Prometheus API
-```
-
-```promql
-up{job="node"}
-```
-
-Результат: 4 series со значением `1`:
-
-```text
-host="web", instance="192.168.85.131:9100"
-host="app", instance="192.168.85.133:9100"
-host="log", instance="192.168.85.135:9100"
-host="monitor", instance="localhost:9100"
-```
-
-Loki datasource:
-
-```text
-Name: Loki
-URL:  http://192.168.85.135:3100
-```
-
-Почему IP: Loki находится на отдельном сервере `log`, а не на `monitor`, поэтому `localhost:3100` здесь был бы неправильным адресом.
-
-Проверки в Grafana:
-
-```text
-Save & test -> Data source successfully connected
-```
-
-```logql
-{host="web", job="nginx"}
-```
-
-Результат: видны nginx access logs с `web`, включая `GET /` и `GET /not-found`.
-
-```logql
-{host="app", job="app"}
-```
-
-Результат: видны app logs с `app`, включая `path=/`, `path=/health`, `path=/bad-endpoint`, `status=200`, `status=404`, уровни `INFO`/`WARN`.
+App `/metrics` scrape пока не добавлен. Это задача этапа Полировка monitoring.
 
 ## Alertmanager
-
-Alertmanager установлен на `monitor` из пакета `prometheus-alertmanager`.
-
-Сервис:
-
-```text
-monitor: prometheus-alertmanager.service
-```
-
-Проверки:
-
-```bash
-systemctl is-enabled prometheus-alertmanager
-systemctl is-active prometheus-alertmanager
-ss -tulpn | grep :9093
-curl http://localhost:9093/-/ready
-```
-
-Подтверждено:
-
-```text
-enabled
-active
-*:9093 LISTEN
-OK
-```
 
 Файл пользовательских параметров запуска:
 
@@ -340,165 +175,876 @@ monitor: /etc/default/prometheus-alertmanager
 ARGS="--cluster.listen-address="
 ```
 
-Причина: после reboot Alertmanager падал с ошибкой определения advertise address для cluster/gossip mesh. В single-node lab кластер Alertmanager не используется, поэтому cluster listener отключен пустым значением `--cluster.listen-address=`. После изменения сервис успешно поднимается после reboot.
+Причина: в single-node lab cluster/gossip listener не нужен; пустое значение отключает cluster listener и решает autostart issue после reboot.
 
-Debian-пакет Alertmanager не включает полноценный web UI. По `http://192.168.85.137:9093` открывается простая HTML-страница с API/health links.
+## Grafana datasources
 
-## node_exporter
-
-node_exporter установлен и работает на всех monitored nodes:
+Prometheus datasource:
 
 ```text
-monitor: localhost:9100, host="monitor"
-web:     192.168.85.131:9100, host="web"
-app:     192.168.85.133:9100, host="app"
-log:     192.168.85.135:9100, host="log"
+Name: Prometheus
+URL:  http://localhost:9090
 ```
 
-### node_exporter на monitor
-
-Сервис:
+Loki datasource:
 
 ```text
-monitor: prometheus-node-exporter.service
+Name: Loki
+URL:  http://192.168.85.135:3100
 ```
-
-Проверки:
-
-```bash
-systemctl is-enabled prometheus-node-exporter
-systemctl is-active prometheus-node-exporter
-ss -tulpn | grep :9100
-curl -s http://localhost:9100/metrics | head
-```
-
-Подтверждено:
-
-```text
-enabled
-active
-*:9100 LISTEN
-/metrics возвращает метрики
-```
-
-## Важное про Grafana install
-
-Официальный Grafana APT/download с `monitor` был недоступен:
-
-```text
-apt.grafana.com/gpg.key -> HTTP 403 Access Denied
-apt.grafana.com/gpg-full.key -> HTTP 403
-dl.grafana.com/...deb -> HTTP 451
-```
-
-Решение: скачать `.deb` на Windows через доступный маршрут, передать на `monitor` через `scp`, установить локально через `sudo apt install ./grafana_...deb`.
-
-После установки временные файлы были очищены:
-
-```bash
-rm -f /tmp/grafana.asc
-sudo rm -f /etc/apt/keyrings/grafana.asc
-sudo rm -f /etc/apt/keyrings/grafana.gpg
-sudo rm -f /etc/apt/sources.list.d/grafana.list
-rm -f ~/grafana*.deb
-sudo apt-get clean
-sudo apt-get autoremove -y
-sudo apt-get update
-```
-
-Директории `/etc/apt/keyrings` и `/etc/apt/sources.list.d` не удалялись.
 
 ## Grafana dashboard: Infrastructure Overview
 
-Dashboard создан через Grafana UI. JSON export пока не зафиксирован в sources.
+Dashboard создан через Grafana UI. JSON export пока не зафиксирован.
 
-Название:
-
-```text
-Infrastructure Overview
-```
-
-Панели и запросы:
-
-### Targets UP
-
-Datasource: `Prometheus`.
-
-```promql
-up{job="node"}
-```
-
-Настройки:
+Основные panels:
 
 ```text
-Visualization: Stat
-Legend: {{host}}
-Type: Instant
-Value mappings:
-  1 -> UP
-  0 -> DOWN
+Targets UP
+Disk Usage by host
+CPU Usage by host
+RAM Usage by host
+Web nginx logs
+App logs
 ```
 
-### CPU Usage by host
-
-Datasource: `Prometheus`.
-
-```promql
-100 - (avg by (host) (rate(node_cpu_seconds_total{job="node", mode="idle"}[5m])) * 100)
-```
-
-### RAM Usage by host
-
-Datasource: `Prometheus`.
-
-```promql
-100 * (1 - (node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}))
-```
-
-### Disk Usage by host
-
-Datasource: `Prometheus`.
-
-```promql
-100 * (1 - (
-  node_filesystem_avail_bytes{job="node", mountpoint="/", fstype!~"tmpfs|overlay|squashfs"}
-  /
-  node_filesystem_size_bytes{job="node", mountpoint="/", fstype!~"tmpfs|overlay|squashfs"}
-))
-```
-
-### Web nginx logs
-
-Datasource: `Loki`.
-
-Базовый запрос:
+Новый product logs query, проверенный в Grafana Explore:
 
 ```logql
-{host="web", job="nginx"}
+{host="app", job="app"} |= "support-desk-api"
 ```
 
-Красивое отображение:
+Красивое форматирование App logs под новый `event=...` формат будет делаться на этапе Полировка logging.
 
-```logql
-{host="web", job="nginx"}
-| regexp `^(?P<client_ip>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "(?P<method>\S+) (?P<path>\S+) (?P<proto>[^"]+)" (?P<status>\d{3}) (?P<size>\d+) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)"`
-| line_format `{{.method}} {{.path}} → {{.status}} from {{.client_ip}}`
+## Nginx reverse proxy для Mini Support Desk
+
+Файл:
+
+```text
+web: /etc/nginx/sites-available/default
 ```
 
-### App logs
+Backup:
 
-Datasource: `Loki`.
-
-Базовый запрос:
-
-```logql
-{host="app", job="app"}
+```text
+web: /etc/nginx/sites-available/default.bak-before-supportdesk-proxy
 ```
 
-Красивое отображение:
+Фрагмент:
 
-```logql
-{host="app", job="app"}
-| regexp `^(?P<ts>\S+ \S+) (?P<level>\S+) service=(?P<service>\S+) method=(?P<method>\S+) path=(?P<path>\S+) status=(?P<status>\d+) client_ip=(?P<client_ip>\S+)`
-| line_format `{{.method}} {{.path}} → {{.status}} from {{.client_ip}}`
+```nginx
+location /api/ {
+    proxy_pass http://192.168.85.133:8080/;
+
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Mapping:
+
+```text
+/api/health              -> /health
+/api/tickets             -> /tickets
+/api/tickets/<id>/status -> /tickets/<id>/status
+/api/metrics             -> /metrics
+```
+
+## Mini Support Desk frontend
+
+Файл:
+
+```text
+web: /var/www/html/index.html
+```
+
+Backup:
+
+```text
+web: /var/www/html/index.html.bak-before-supportdesk
+```
+
+Функциональность:
+
+- `GET /api/health`;
+- `GET /api/tickets`;
+- `POST /api/tickets`;
+- `PATCH /api/tickets/<id>/status`;
+- Last API response;
+- backend UTC time + browser local time.
+
+### Полный текущий код `/var/www/html/index.html`
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Mini Support Desk</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #1f2933;
+        }
+
+        header {
+            background: #111827;
+            color: white;
+            padding: 24px 40px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 32px;
+        }
+
+        header p {
+            margin: 8px 0 0;
+            color: #cbd5e1;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 28px auto;
+            padding: 0 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 22px;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            font-size: 22px;
+        }
+
+        label {
+            display: block;
+            margin-top: 14px;
+            font-weight: bold;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 6px;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+
+        textarea {
+            min-height: 90px;
+        }
+
+        button {
+            margin-top: 16px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        .secondary {
+            background: #475569;
+            margin-left: 8px;
+        }
+
+        .secondary:hover {
+            background: #334155;
+        }
+
+        .ticket {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 12px;
+            background: #f8fafc;
+        }
+
+        .ticket-title {
+            font-weight: bold;
+            font-size: 17px;
+        }
+
+        .meta {
+            margin-top: 8px;
+            font-size: 14px;
+            color: #64748b;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: bold;
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .priority {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: bold;
+            background: #fee2e2;
+            color: #991b1b;
+            margin-left: 6px;
+        }
+
+        .health-ok {
+            color: #15803d;
+            font-weight: bold;
+        }
+
+        .health-bad {
+            color: #b91c1c;
+            font-weight: bold;
+        }
+
+        .full-width {
+            margin-top: 24px;
+        }
+
+        pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 10px;
+            padding: 14px;
+            overflow-x: auto;
+        }
+
+        @media (max-width: 800px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            header {
+                padding: 22px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<header>
+    <h1>Mini Support Desk</h1>
+    <p>Demo product for Mini Corporate Infrastructure Lab: Browser → web/Nginx → app/API</p>
+</header>
+
+<main>
+    <div class="grid">
+        <section class="card">
+            <h2>Backend status</h2>
+            <p id="health">Checking backend...</p>
+            <button onclick="loadHealth()">Refresh health</button>
+            <button class="secondary" onclick="loadTickets()">Refresh tickets</button>
+        </section>
+
+        <section class="card">
+            <h2>Create ticket</h2>
+
+            <label for="title">Title</label>
+            <input id="title" placeholder="Example: Cannot access Grafana">
+
+            <label for="description">Description</label>
+            <textarea id="description" placeholder="Describe the issue"></textarea>
+
+            <label for="priority">Priority</label>
+            <select id="priority">
+                <option value="low">low</option>
+                <option value="normal" selected>normal</option>
+                <option value="high">high</option>
+                <option value="critical">critical</option>
+            </select>
+
+            <button onclick="createTicket()">Create ticket</button>
+        </section>
+    </div>
+
+    <section class="card full-width">
+        <h2>Tickets</h2>
+        <div id="tickets">Loading tickets...</div>
+    </section>
+
+    <section class="card full-width">
+        <h2>Last API response</h2>
+        <pre id="api-response">No API response yet.</pre>
+    </section>
+</main>
+
+<script>
+    async function loadHealth() {
+        const healthEl = document.getElementById("health");
+        try {
+            const response = await fetch("/api/health");
+            const data = await response.json();
+            const backendTime = new Date(data.time);
+
+            healthEl.innerHTML = `
+                <span class="health-ok">OK</span><br>
+                Service: ${data.service}<br>
+                Version: ${data.version}<br>
+                Environment: ${data.environment}<br>
+                Backend time UTC: ${data.time}<br>
+                Your local time: ${backendTime.toLocaleString()}
+            `;
+
+            showResponse(data);
+        } catch (error) {
+            healthEl.innerHTML = `<span class="health-bad">Backend unavailable</span>`;
+            showResponse({ error: String(error) });
+        }
+    }
+
+    async function loadTickets() {
+        const ticketsEl = document.getElementById("tickets");
+
+        try {
+            const response = await fetch("/api/tickets");
+            const data = await response.json();
+
+            if (!data.tickets || data.tickets.length === 0) {
+                ticketsEl.innerHTML = "No tickets yet.";
+                return;
+            }
+
+            ticketsEl.innerHTML = data.tickets.map(ticket => `
+                <div class="ticket">
+                    <div class="ticket-title">#${ticket.id} ${escapeHtml(ticket.title)}</div>
+                    <div>${escapeHtml(ticket.description || "")}</div>
+                    <div class="meta">
+                        <span class="status">${ticket.status}</span>
+                        <span class="priority">${ticket.priority}</span>
+                        source=${ticket.source}
+                    </div>
+                    <button onclick="changeStatus(${ticket.id}, 'open')">Open</button>
+                    <button onclick="changeStatus(${ticket.id}, 'in_progress')">In progress</button>
+                    <button onclick="changeStatus(${ticket.id}, 'resolved')">Resolved</button>
+                </div>
+            `).join("");
+
+            showResponse(data);
+        } catch (error) {
+            ticketsEl.innerHTML = "Failed to load tickets.";
+            showResponse({ error: String(error) });
+        }
+    }
+
+    async function createTicket() {
+        const title = document.getElementById("title").value.trim();
+        const description = document.getElementById("description").value.trim();
+        const priority = document.getElementById("priority").value;
+
+        if (!title) {
+            alert("Title is required");
+            return;
+        }
+
+        const payload = {
+            title: title,
+            description: description,
+            priority: priority,
+            source: "web"
+        };
+
+        const response = await fetch("/api/tickets", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        showResponse(data);
+
+        document.getElementById("title").value = "";
+        document.getElementById("description").value = "";
+
+        await loadTickets();
+    }
+
+    async function changeStatus(ticketId, status) {
+        const response = await fetch(`/api/tickets/${ticketId}/status`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                status: status,
+                source: "web"
+            })
+        });
+
+        const data = await response.json();
+        showResponse(data);
+        await loadTickets();
+    }
+
+    function showResponse(data) {
+        document.getElementById("api-response").textContent =
+            JSON.stringify(data, null, 2);
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll("\"", "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    loadHealth();
+    loadTickets();
+</script>
+</body>
+</html>
+```
+
+## Mini Support Desk backend
+
+Файл:
+
+```text
+app: /opt/app/app.py
+```
+
+Backup:
+
+```text
+app: /opt/app/app.py.bak-before-supportdesk
+```
+
+Данные:
+
+```text
+app: /opt/app/tickets.json
+```
+
+Endpoints:
+
+```text
+GET    /health
+GET    /tickets
+POST   /tickets
+GET    /tickets/<id>
+PATCH  /tickets/<id>/status
+GET    /metrics
+```
+
+Product metrics:
+
+```text
+supportdesk_tickets_total
+supportdesk_tickets_open
+supportdesk_tickets_in_progress
+supportdesk_tickets_resolved
+```
+
+### Полный текущий код `/opt/app/app.py`
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
+from datetime import datetime, timezone
+import json
+import logging
+import os
+import re
+import time
+
+HOST = "0.0.0.0"
+PORT = 8080
+
+SERVICE_NAME = "support-desk-api"
+SERVICE_VERSION = "1.0.0"
+ENVIRONMENT = "lab"
+
+LOG_FILE = "/var/log/app/app.log"
+DATA_FILE = "/opt/app/tickets.json"
+
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s service=support-desk-api %(message)s",
+)
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_tickets():
+    if not os.path.exists(DATA_FILE):
+        return [
+            {
+                "id": 1,
+                "title": "VPN access issue",
+                "description": "User cannot access internal resources through VPN.",
+                "priority": "high",
+                "status": "open",
+                "source": "seed",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            },
+            {
+                "id": 2,
+                "title": "Grafana access request",
+                "description": "New team member needs access to monitoring dashboards.",
+                "priority": "normal",
+                "status": "in_progress",
+                "source": "seed",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            },
+            {
+                "id": 3,
+                "title": "Backend health check",
+                "description": "Regular health check ticket for app service.",
+                "priority": "low",
+                "status": "resolved",
+                "source": "seed",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            },
+        ]
+
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_tickets(tickets):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(tickets, f, ensure_ascii=False, indent=2)
+
+
+def next_ticket_id(tickets):
+    if not tickets:
+        return 1
+    return max(ticket["id"] for ticket in tickets) + 1
+
+
+def count_by_status(tickets, status):
+    return sum(1 for ticket in tickets if ticket["status"] == status)
+
+
+class SupportDeskHandler(BaseHTTPRequestHandler):
+    def send_json(self, status_code, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def read_json_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            return {}
+
+        raw_body = self.rfile.read(length)
+        return json.loads(raw_body.decode("utf-8"))
+
+    def log_event(self, level, event, status_code, **fields):
+        parts = [
+            f"event={event}",
+            f"method={self.command}",
+            f"path={self.path}",
+            f"status={status_code}",
+            f"client_ip={self.client_address[0]}",
+        ]
+
+        for key, value in fields.items():
+            safe_value = str(value).replace(" ", "_")
+            parts.append(f"{key}={safe_value}")
+
+        logging.log(level, " ".join(parts))
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        try:
+            if path == "/health":
+                payload = {
+                    "status": "ok",
+                    "service": SERVICE_NAME,
+                    "version": SERVICE_VERSION,
+                    "environment": ENVIRONMENT,
+                    "time": now_iso(),
+                }
+                self.send_json(200, payload)
+                self.log_event(logging.INFO, "health_check", 200)
+
+            elif path == "/tickets":
+                tickets = load_tickets()
+                payload = {
+                    "tickets": tickets,
+                    "count": len(tickets),
+                }
+                self.send_json(200, payload)
+                self.log_event(
+                    logging.INFO,
+                    "ticket_list_requested",
+                    200,
+                    count=len(tickets),
+                )
+
+            elif re.fullmatch(r"/tickets/\d+", path):
+                ticket_id = int(path.split("/")[-1])
+                tickets = load_tickets()
+                ticket = next((item for item in tickets if item["id"] == ticket_id), None)
+
+                if ticket is None:
+                    self.send_json(404, {"error": "ticket_not_found"})
+                    self.log_event(
+                        logging.WARNING,
+                        "ticket_not_found",
+                        404,
+                        ticket_id=ticket_id,
+                    )
+                else:
+                    self.send_json(200, ticket)
+                    self.log_event(
+                        logging.INFO,
+                        "ticket_detail_requested",
+                        200,
+                        ticket_id=ticket_id,
+                    )
+
+            elif path == "/metrics":
+                tickets = load_tickets()
+                lines = [
+                    "# HELP supportdesk_tickets_total Total number of support desk tickets",
+                    "# TYPE supportdesk_tickets_total gauge",
+                    f"supportdesk_tickets_total {len(tickets)}",
+                    "# HELP supportdesk_tickets_open Number of open support desk tickets",
+                    "# TYPE supportdesk_tickets_open gauge",
+                    f"supportdesk_tickets_open {count_by_status(tickets, 'open')}",
+                    "# HELP supportdesk_tickets_in_progress Number of in-progress support desk tickets",
+                    "# TYPE supportdesk_tickets_in_progress gauge",
+                    f"supportdesk_tickets_in_progress {count_by_status(tickets, 'in_progress')}",
+                    "# HELP supportdesk_tickets_resolved Number of resolved support desk tickets",
+                    "# TYPE supportdesk_tickets_resolved gauge",
+                    f"supportdesk_tickets_resolved {count_by_status(tickets, 'resolved')}",
+                    "",
+                ]
+                body = "\n".join(lines).encode("utf-8")
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+                self.log_event(logging.INFO, "metrics_requested", 200)
+
+            else:
+                self.send_json(404, {"error": "not_found"})
+                self.log_event(logging.WARNING, "endpoint_not_found", 404)
+
+        except Exception as exc:
+            self.send_json(500, {"error": "internal_server_error"})
+            self.log_event(logging.ERROR, "internal_error", 500, error=type(exc).__name__)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        try:
+            if path == "/tickets":
+                data = self.read_json_body()
+
+                title = str(data.get("title", "")).strip()
+                description = str(data.get("description", "")).strip()
+                priority = str(data.get("priority", "normal")).strip().lower()
+                source = str(data.get("source", "web")).strip().lower()
+
+                if not title:
+                    self.send_json(400, {"error": "missing_title"})
+                    self.log_event(
+                        logging.WARNING,
+                        "ticket_validation_failed",
+                        400,
+                        reason="missing_title",
+                        source=source,
+                    )
+                    return
+
+                if priority not in ["low", "normal", "high", "critical"]:
+                    priority = "normal"
+
+                tickets = load_tickets()
+                ticket = {
+                    "id": next_ticket_id(tickets),
+                    "title": title,
+                    "description": description,
+                    "priority": priority,
+                    "status": "open",
+                    "source": source,
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                }
+
+                tickets.append(ticket)
+                save_tickets(tickets)
+
+                self.send_json(201, ticket)
+                self.log_event(
+                    logging.INFO,
+                    "ticket_created",
+                    201,
+                    ticket_id=ticket["id"],
+                    priority=priority,
+                    source=source,
+                )
+
+            else:
+                self.send_json(404, {"error": "not_found"})
+                self.log_event(logging.WARNING, "endpoint_not_found", 404)
+
+        except json.JSONDecodeError:
+            self.send_json(400, {"error": "invalid_json"})
+            self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason="invalid_json")
+
+        except Exception as exc:
+            self.send_json(500, {"error": "internal_server_error"})
+            self.log_event(logging.ERROR, "internal_error", 500, error=type(exc).__name__)
+
+    def do_PATCH(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        try:
+            match = re.fullmatch(r"/tickets/(\d+)/status", path)
+
+            if not match:
+                self.send_json(404, {"error": "not_found"})
+                self.log_event(logging.WARNING, "endpoint_not_found", 404)
+                return
+
+            ticket_id = int(match.group(1))
+            data = self.read_json_body()
+
+            new_status = str(data.get("status", "")).strip().lower()
+            source = str(data.get("source", "web")).strip().lower()
+
+            if new_status not in ["open", "in_progress", "resolved"]:
+                self.send_json(400, {"error": "invalid_status"})
+                self.log_event(
+                    logging.WARNING,
+                    "ticket_validation_failed",
+                    400,
+                    reason="invalid_status",
+                    ticket_id=ticket_id,
+                    source=source,
+                )
+                return
+
+            tickets = load_tickets()
+            ticket = next((item for item in tickets if item["id"] == ticket_id), None)
+
+            if ticket is None:
+                self.send_json(404, {"error": "ticket_not_found"})
+                self.log_event(
+                    logging.WARNING,
+                    "ticket_not_found",
+                    404,
+                    ticket_id=ticket_id,
+                    source=source,
+                )
+                return
+
+            old_status = ticket["status"]
+            ticket["status"] = new_status
+            ticket["updated_at"] = now_iso()
+            save_tickets(tickets)
+
+            self.send_json(200, ticket)
+            self.log_event(
+                logging.INFO,
+                "ticket_status_changed",
+                200,
+                ticket_id=ticket_id,
+                old_status=old_status,
+                new_status=new_status,
+                source=source,
+            )
+
+        except json.JSONDecodeError:
+            self.send_json(400, {"error": "invalid_json"})
+            self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason="invalid_json")
+
+        except Exception as exc:
+            self.send_json(500, {"error": "internal_server_error"})
+            self.log_event(logging.ERROR, "internal_error", 500, error=type(exc).__name__)
+
+    def log_message(self, format, *args):
+        return
+
+
+if __name__ == "__main__":
+    server = HTTPServer((HOST, PORT), SupportDeskHandler)
+    server.serve_forever()
+```
+
+## Windows portproxy для будущего Telegram bot
+
+Текущий workaround без секретов:
+
+```text
+192.168.85.1:10802 -> 127.0.0.1:10801
+```
+
+Команды:
+
+```cmd
+netsh interface portproxy add v4tov4 listenaddress=192.168.85.1 listenport=10802 connectaddress=127.0.0.1 connectport=10801
+netsh advfirewall firewall add rule name="Allow VM to XRay proxy 10802" dir=in action=allow protocol=TCP localip=192.168.85.1 localport=10802 remoteip=192.168.85.0/24
+```
+
+Проверка с `app`:
+
+```bash
+nc -vzn 192.168.85.1 10802
+curl -x http://192.168.85.1:10802 -I https://api.telegram.org
+```
+
+Будущий env:
+
+```bash
+HTTP_PROXY=http://192.168.85.1:10802
+HTTPS_PROXY=http://192.168.85.1:10802
+NO_PROXY=localhost,127.0.0.1,192.168.85.0/24
 ```
