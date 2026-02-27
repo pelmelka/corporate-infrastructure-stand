@@ -2,62 +2,101 @@
 
 ## Сценарий 1. Нормальная работа системы
 
-Цель: показать, что frontend, backend, логирование и мониторинг работают вместе.
-
-Текущий статус: frontend и backend уже работают отдельно, nginx logs и app logs доходят в Loki, Prometheus/Grafana/Alertmanager подняты на `monitor`, dashboard `Infrastructure Overview` создан. Следующий недостающий элемент для полноценного пользовательского сценария — reverse proxy `web -> app`.
-
-Шаги сейчас:
-
-1. Открыть сайт `http://192.168.85.131`.
-2. Проверить backend напрямую: `curl http://192.168.85.133:8080/health`.
-3. Открыть Grafana dashboard `Infrastructure Overview`.
-4. Показать `Targets UP`, CPU/RAM/Disk, `Web nginx logs`, `App logs`.
-
-Шаги после web/app integration:
-
-1. Открыть сайт `http://192.168.85.131`.
-2. Проверить backend через web reverse proxy: `curl http://192.168.85.131/api/health`.
-3. Показать, что запросы видны в nginx logs и app logs.
-4. Показать состояние узлов и ресурсов в dashboard `Infrastructure Overview`.
-
-Ожидаемый итог: сайт и backend связаны в один пользовательский поток `Browser -> web -> app`; запросы видны в логах, узлы видны в мониторинге.
-
-## Сценарий 2. App service down
-
-Цель: показать troubleshooting backend-сервиса.
+Цель: показать, что frontend, backend, логирование и мониторинг работают вместе на примере продукта Mini Support Desk.
 
 Шаги:
 
-```bash
-sudo systemctl stop app.service
-curl http://192.168.85.133:8080/health
-systemctl status app.service
-journalctl -u app.service -n 50
-sudo systemctl start app.service
-curl http://192.168.85.133:8080/health
-```
-
-После web/app integration дополнительно проверить через `web`:
+1. Открыть `http://192.168.85.131`.
+2. Проверить, что Backend status показывает `OK`.
+3. Создать заявку через форму Mini Support Desk.
+4. Изменить статус заявки.
+5. Проверить backend через web reverse proxy:
 
 ```bash
 curl http://192.168.85.131/api/health
 ```
 
-Ожидаемый итог: видно обнаружение проблемы, диагностика, восстановление и подтверждение восстановления.
-
-Дополнительно после восстановления можно проверить app logs:
+6. Проверить nginx logs на `web`:
 
 ```bash
-tail -n 20 /var/log/app/app.log
+sudo tail -n 30 /var/log/nginx/access.log
 ```
 
-И в Loki/Grafana:
+7. Проверить app product logs на `app`:
+
+```bash
+sudo tail -n 30 /var/log/app/app.log
+```
+
+8. Проверить Loki/Grafana:
+
+```logql
+{host="app", job="app"} |= "support-desk-api"
+```
+
+Ожидаемый итог: Browser -> web -> app работает; пользовательские действия создают product logs; nginx logs и app logs видны в Loki/Grafana.
+
+## Сценарий 2. Mini Support Desk product flow
+
+Цель: показать продуктовый сценарий, а не просто infrastructure healthcheck.
+
+Шаги:
+
+1. Открыть `http://192.168.85.131`.
+2. Создать заявку:
+   - Title: `Browser test ticket`
+   - Description: `Created from Mini Support Desk web UI`
+   - Priority: `high`
+3. Изменить статус заявки на `in_progress`.
+4. Изменить статус заявки на `resolved`.
+5. Проверить web logs:
 
 ```text
-{host="app", job="app"}
+POST /api/tickets HTTP/1.1 201
+PATCH /api/tickets/<id>/status HTTP/1.1 200
 ```
 
-## Сценарий 3. Web access logs
+6. Проверить app logs:
+
+```text
+event=ticket_created
+event=ticket_status_changed
+```
+
+7. Проверить Loki/Grafana:
+
+```logql
+{host="app", job="app"} |= "support-desk-api"
+```
+
+Ожидаемый итог: UI action -> web access log -> app product log -> Loki/Grafana.
+
+## Сценарий 3. App service down
+
+Цель: показать troubleshooting backend-сервиса через пользовательский путь.
+
+Шаги:
+
+```bash
+# app
+sudo systemctl stop app.service
+
+# web или admin
+curl http://192.168.85.131/api/health
+
+# app
+systemctl status app.service --no-pager
+journalctl -u app.service -n 50 --no-pager
+sudo systemctl start app.service
+curl http://localhost:8080/health
+
+# web или admin
+curl http://192.168.85.131/api/health
+```
+
+Ожидаемый итог: при остановленном backend Nginx возвращает ошибку upstream/reverse proxy уровня; после восстановления `app.service` API снова отвечает.
+
+## Сценарий 4. Web access logs
 
 Цель: показать централизованный сбор nginx logs.
 
@@ -65,73 +104,45 @@ tail -n 20 /var/log/app/app.log
 
 ```bash
 curl http://192.168.85.131/
+curl http://192.168.85.131/api/health
+curl http://192.168.85.131/api/tickets
 curl http://192.168.85.131/not-found-grafana-test
 ```
 
-После reverse proxy также:
+В Grafana/Loki искать:
 
-```bash
-curl http://192.168.85.131/api/health
-```
-
-Локально это должно попасть в:
-
-```text
-/var/log/nginx/access.log
-/var/log/nginx/error.log
-```
-
-Promtail отправляет nginx logs в Loki. В Grafana/Loki искать:
-
-```text
+```logql
 {host="web", job="nginx"}
 ```
 
-Текущее состояние: сценарий технически подтвержден. Dashboard `Infrastructure Overview` содержит panel `Web nginx logs`, где строки отображаются в сокращенном виде через LogQL `regexp` и `line_format`.
+Ожидаемый итог: видны HTTP-запросы к frontend и API route.
 
-## Сценарий 4. App logs
+## Сценарий 5. App product logs
 
-Цель: показать централизованный сбор backend logs.
+Цель: показать централизованный сбор backend product logs.
 
 Шаги:
 
-```bash
-curl http://192.168.85.133:8080/
-curl http://192.168.85.133:8080/health
-curl http://192.168.85.133:8080/bad-endpoint-grafana-test
+1. Создать заявку через UI.
+2. Изменить ее статус.
+3. Проверить Loki/Grafana:
+
+```logql
+{host="app", job="app"} |= "support-desk-api"
 ```
 
-После reverse proxy часть запросов будет приходить через `web`:
-
-```bash
-curl http://192.168.85.131/api/health
-```
-
-Локально это должно попасть в:
+Ожидаемые события:
 
 ```text
-/var/log/app/app.log
+event=ticket_created
+event=ticket_status_changed
+event=ticket_list_requested
+event=health_check
 ```
 
-Примеры строк:
+## Сценарий 6. Infrastructure overview
 
-```text
-INFO service=python-backend method=GET path=/ status=200 client_ip=...
-INFO service=python-backend method=GET path=/health status=200 client_ip=...
-WARNING service=python-backend method=GET path=/bad-endpoint status=404 client_ip=...
-```
-
-Promtail отправляет app logs в Loki. В Grafana/Loki искать:
-
-```text
-{host="app", job="app"}
-```
-
-Текущее состояние: сценарий технически подтвержден. Dashboard `Infrastructure Overview` содержит panel `App logs`, где строки отображаются в сокращенном виде через LogQL `regexp` и `line_format`.
-
-## Сценарий 5. Infrastructure overview
-
-Цель: показать Grafana dashboard.
+Цель: показать Grafana dashboard `Infrastructure Overview`.
 
 Должно быть видно:
 
@@ -143,34 +154,17 @@ Promtail отправляет app logs в Loki. В Grafana/Loki искать:
 - web nginx logs;
 - app logs.
 
-Текущее состояние: dashboard `Infrastructure Overview` создан и сохранен в Grafana. Он использует Prometheus datasource для `Targets UP`, CPU, RAM, Disk и Loki datasource для `Web nginx logs`, `App logs`.
+Важно: текущая App logs panel была создана под старый формат. Красивое отображение product logs под `event=...` будет обновляться на этапе Полировка logging.
 
-Для наполнения log-панелей свежими событиями можно выполнить:
+## Сценарий 7. Product incident from support tickets — будущий
 
-```bash
-curl http://192.168.85.131/
-curl http://192.168.85.131/not-found-grafana-test
-curl http://192.168.85.133:8080/
-curl http://192.168.85.133:8080/health
-curl http://192.168.85.133:8080/bad-endpoint-grafana-test
-```
+Цель: будущая демонстрация product-level alerting.
 
-После web/app integration дополнительно:
+Идея:
 
-```bash
-curl http://192.168.85.131/api/health
-```
+1. Создать несколько заявок на один ресурс, например `grafana`.
+2. Создать несколько заявок по категории `observability`.
+3. Prometheus product metrics фиксируют рост open tickets by resource/category.
+4. Alertmanager показывает alert вида `SupportDeskTooManyTicketsForResource` или `SupportDeskCategoryIncident`.
 
-## Сценарий 6. Recovery story
-
-Цель: показать инженерный подход к восстановлению.
-
-Последовательность:
-
-1. Создать проблему: остановить `app.service`, сломать nginx config или остановить promtail.
-2. Посмотреть симптомы: curl, Grafana dashboard, Prometheus targets, Loki logs.
-3. Найти причину: `systemctl`, `journalctl`, локальные logs, Grafana logs panels.
-4. Исправить.
-5. Проверить восстановление.
-
-Текущее состояние: базовая часть для recovery уже есть — `app.service`, `promtail.service`, `loki.service`, nginx logs, app logs, Prometheus, Grafana, Alertmanager и dashboard `Infrastructure Overview`. После web/app integration recovery-сценарий станет нагляднее, потому что можно будет показать отказ backend через пользовательский путь `Browser -> web -> app`.
+Этот сценарий пока не реализован. Детали — в `12_future_improvements_backlog.md`.

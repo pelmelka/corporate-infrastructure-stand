@@ -4,13 +4,11 @@
 
 ### VMware
 
-Используется как среда, внутри которой запущен Proxmox VE. Дает NAT-сеть `192.168.85.0/24`.
+Среда, внутри которой запущен Proxmox VE. Дает NAT-сеть `192.168.85.0/24`.
 
 ### Proxmox VE
 
-Версия по скриншотам: `Proxmox VE 9.1.1`.
-
-Роль: создание VM, управление ресурсами, snapshots, web UI, bridge `vmbr0` и потенциально `vmbr1`.
+Роль: создание VM, управление ресурсами, snapshots, web UI, bridge `vmbr0`.
 
 ## OS
 
@@ -20,349 +18,118 @@
 
 ## Управление и автоматизация
 
-### SSH
+### SSH / sudo
 
-Подключения с Windows к `admin`, с `admin` к узлам, будущая база для Ansible.
-
-### sudo
-
-Пользователь `pelmel` добавляется в группу `sudo` на всех узлах.
+SSH работает на всех узлах. Пользователь `pelmel` имеет sudo.
 
 ### Ansible
 
-Установлен на `admin`. Роль: inventory, ad-hoc команды, будущие playbook'и, автоматизация установки и настройки сервисов.
-
-### Git, план
-
-Пока пропущен. В будущем нужен для хранения структуры проекта, README, playbook'ов, шаблонов и истории изменений.
+Установлен на `admin`. Сейчас inventory минимальный, будущие playbook'и запланированы.
 
 ## Web слой
 
 ### Nginx
 
-Установлен на `web`. Роль: статический frontend, позже reverse proxy, access/error logs.
+Установлен на `web`.
+
+Текущая роль:
+
+- frontend server для Mini Support Desk;
+- reverse proxy `/api/* -> app:8080`;
+- access/error logs;
+- будущая точка для HTTPS, rate limiting, security headers.
 
 Текущее состояние:
 
-- `nginx.service`: `active (running)`;
-- порт `80`: слушается;
+- `nginx.service active/running`;
+- порт `80` слушается;
 - сайт отдается из `/var/www/html/index.html`;
-- access/error логи пишутся в `/var/log/nginx/`;
+- proxy block находится в `/etc/nginx/sites-available/default`;
 - nginx logs отправляются в Loki через Promtail.
 
 ## Application слой
 
 ### Python
 
-Используется на `app`. Сейчас стандартная библиотека `http.server`; позже возможен Flask.
+Используется на `app`. Сейчас стандартная библиотека `http.server`; приложение реализовано как Mini Support Desk API.
 
 Текущее состояние:
 
-- приложение находится в `/opt/app/app.py`;
+- код: `/opt/app/app.py`;
 - сервис: `app.service`;
 - порт: `8080`;
-- endpoints: `/`, `/health`, остальные пути дают `404`;
-- application logs пишутся в `/var/log/app/app.log`;
-- app logs отправляются в Loki через Promtail.
+- данные: `/opt/app/tickets.json`;
+- logs: `/var/log/app/app.log`;
+- endpoints: `/health`, `/tickets`, `/tickets/<id>`, `/tickets/<id>/status`, `/metrics`;
+- product logs: `event=...` в key=value формате;
+- product metrics: текущие tickets counts на `/metrics`.
 
 ### systemd
 
-Используется для:
-
-- `app.service` на `app`;
-- `loki.service` на `log`;
-- `promtail.service` на `web`;
-- `promtail.service` на `app`;
-- позже для Prometheus, Grafana, Alertmanager, node_exporter.
+Используется для `app.service`, `loki.service`, `promtail.service`, Prometheus, Grafana, Alertmanager, node_exporter.
 
 ## Logging
 
 ### Loki
 
-Установлен на `log`.
+Установлен на `log`, принимает nginx logs и app product logs.
 
-Текущее состояние:
+### Promtail
 
-- версия: `3.5.0`;
-- binary: `/opt/loki/loki`;
-- config: `/etc/loki/config.yml`;
-- data dir: `/var/lib/loki`;
-- user/group: `loki:loki`;
-- service: `loki.service`;
-- status: `active (running)`;
-- autostart: `enabled`;
-- HTTP API: `192.168.85.135:3100`;
-- `/ready` локально и с `admin` возвращает `ready`;
-- принимает nginx logs от `web` через Promtail;
-- принимает app logs от `app` через Promtail;
-- запрос `{host="web",job="nginx"}` через `/loki/api/v1/query_range` возвращает nginx access logs;
-- запрос `{host="app",job="app"}` через `/loki/api/v1/query_range` возвращает app logs.
+Установлен на `web` и `app`.
 
-Роль: хранение логов и API для Grafana.
-
-### Promtail на web
-
-Установлен на `web`.
-
-Текущее состояние:
-
-- версия: `3.5.0`;
-- binary: `/opt/promtail/promtail`;
-- config: `/etc/promtail/config.yml`;
-- positions: `/var/lib/promtail/positions.yaml`;
-- user/group: `promtail:promtail`;
-- дополнительная группа: `adm` для чтения `/var/log/nginx/*.log`;
-- service: `promtail.service`;
-- status: `active (running)`;
-- autostart: `enabled`;
-- служебный порт: `9080`;
-- читает: `/var/log/nginx/access.log`, `/var/log/nginx/error.log`;
-- отправляет в Loki: `http://192.168.85.135:3100/loki/api/v1/push`;
-- labels: `host=web`, `job=nginx`, `service=frontend`, `env=lab`.
-
-Роль: чтение nginx logs, добавление labels, отправка в Loki.
-
-### Promtail на app
-
-Установлен на `app`.
-
-Текущее состояние:
-
-- версия: `3.5.0`;
-- binary: `/opt/promtail/promtail`;
-- config: `/etc/promtail/config.yml`;
-- positions: `/var/lib/promtail/positions.yaml`;
-- user/group: `promtail:promtail`;
-- дополнительная группа: `adm` для чтения `/var/log/app/app.log`;
-- service: `promtail.service`;
-- status: `active (running)`;
-- autostart: `enabled`;
-- служебный порт: `9080`;
-- читает: `/var/log/app/app.log` через паттерн `/var/log/app/*.log`;
-- отправляет в Loki: `http://192.168.85.135:3100/loki/api/v1/push`;
-- labels: `host=app`, `job=app`, `service=python-backend`, `env=lab`.
-
-Роль: чтение app logs, добавление labels, отправка в Loki.
-
-Важно: `/loki/api/v1/push` — API endpoint для POST-запросов от Promtail, а не страница для браузера. `HTTP ERROR 405` при открытии в браузере не означает поломку.
-
-Важно: обычные log queries нужно проверять через `/loki/api/v1/query_range`, а не через `/loki/api/v1/query`.
+- `web`: читает `/var/log/nginx/*.log`;
+- `app`: читает `/var/log/app/*.log`.
 
 ## Monitoring
 
 ### Prometheus
 
-Установлен на `monitor` из стандартных Debian-репозиториев.
-
-Текущее состояние:
-
-- service: `prometheus.service`;
-- status: `active (running)`;
-- autostart: `enabled`;
-- порт: `9090`;
-- UI: `http://192.168.85.137:9090`;
-- readiness: `curl http://localhost:9090/-/ready -> Prometheus Server is Ready.`;
-- API-запрос `query=up` возвращает `job="prometheus", instance="localhost:9090", value="1"`;
-- видит local node_exporter на `localhost:9100`;
-- видит node_exporter на `web`, `app`, `log`;
-- Prometheus UI показывает `node (4/4 up)`;
-- у node targets добавлены labels `host="monitor"`, `host="web"`, `host="app"`, `host="log"`.
-
-Роль: сбор и хранение метрик. Сейчас собирает метрики самого `monitor` и системные метрики `web`, `app`, `log` через node_exporter.
+Установлен на `monitor`, собирает node_exporter metrics с `web`, `app`, `log`, `monitor`. App `/metrics` scrape пока не добавлен.
 
 ### Grafana
 
-Установлена на `monitor` как Grafana 13.0.1 через локальный `.deb` файл.
-
-Текущее состояние:
-
-- service: `grafana-server.service`;
-- status: `active (running)`;
-- autostart: `enabled`;
-- порт: `3000`;
-- UI: `http://192.168.85.137:3000`;
-- `curl -I http://localhost:3000` возвращает `HTTP/1.1 302 Found` и `Location: /login`.
-
-Роль: UI для dashboard'ов, логов и метрик. Grafana подключена к двум datasources:
-
-- Prometheus: `http://localhost:9090`;
-- Loki: `http://192.168.85.135:3100`.
-
-Проверено:
-
-- Prometheus datasource: `Save & test` успешен;
-- Prometheus query `up{job="node"}` показывает `web`, `app`, `log`, `monitor` со значением `1`;
-- Loki datasource: `Save & test` успешен;
-- LogQL `{host="web", job="nginx"}` показывает nginx logs;
-- LogQL `{host="app", job="app"}` показывает app logs;
-- создан dashboard `Infrastructure Overview`;
-- dashboard показывает `Targets UP`, `Disk Usage by host`, `CPU Usage by host`, `RAM Usage by host`, `Web nginx logs`, `App logs`;
-- для web/app log panels используются LogQL `regexp` и `line_format`, чтобы строки отображались в коротком читаемом виде.
-
-Особенность установки: официальный Grafana APT/download был недоступен из текущей сети/маршрута:
-
-```text
-apt.grafana.com/gpg.key -> HTTP 403 Access Denied
-apt.grafana.com/gpg-full.key -> HTTP 403
-ответ содержал: Sorry, the provided token is not valid
-dl.grafana.com/...deb -> HTTP 451
-```
-
-Практическое решение: скачать `.deb` на Windows через доступный маршрут, передать на `monitor` через `scp`, установить локально через `sudo apt install ./grafana_...deb`. После установки следы неудачных попыток были очищены. Директории `/etc/apt/keyrings` и `/etc/apt/sources.list.d` не удалялись.
+Установлена на `monitor`, подключены datasources Prometheus и Loki, создан dashboard `Infrastructure Overview`.
 
 ### Alertmanager
 
-Установлен на `monitor` из стандартных Debian-репозиториев как пакет `prometheus-alertmanager`.
-
-Текущее состояние:
-
-- service: `prometheus-alertmanager.service`;
-- status: `active (running)`;
-- autostart: `enabled`;
-- порт: `9093`;
-- readiness: `curl http://localhost:9093/-/ready -> OK`;
-- Prometheus уже знает Alertmanager через `localhost:9093`;
-- после reboot сервис поднимается корректно;
-- cluster/gossip listener отключен через `/etc/default/prometheus-alertmanager`: `ARGS="--cluster.listen-address="`.
-
-Проверка Prometheus API:
-
-```bash
-curl -s http://localhost:9090/api/v1/alertmanagers | python3 -m json.tool
-```
-
-Подтверждено:
-
-```json
-{
-    "status": "success",
-    "data": {
-        "activeAlertmanagers": [
-            {
-                "url": "http://localhost:9093/api/v2/alerts"
-            }
-        ],
-        "droppedAlertmanagers": []
-    }
-}
-```
-
-Важно: Debian-пакет Alertmanager не включает полноценный web UI. По `http://192.168.85.137:9093` открывается простая HTML-страница с пояснением и ссылками на `/metrics`, `/-/healthy`, `/-/ready`. Это нормально, API и health endpoints работают.
+Установлен на `monitor`, связан с Prometheus. Alert rules пока не создавались.
 
 ### node_exporter
 
-`node_exporter` установлен как пакет `prometheus-node-exporter` на всех monitored nodes:
+Установлен на `monitor`, `web`, `app`, `log`; Prometheus показывает `node (4/4 up)`.
+
+## Future components
+
+### Telegram bot
+
+Пока не реализован. Архитектурно выбран будущий вариант:
 
 ```text
-monitor: localhost:9100
-web:     192.168.85.131:9100
-app:     192.168.85.133:9100
-log:     192.168.85.135:9100
+Browser -> web -> app
+Telegram -> support-bot.service -> app
 ```
 
-Текущее состояние:
-
-- service: `prometheus-node-exporter.service`;
-- status: `active (running)` на `monitor`, `web`, `app`, `log`;
-- autostart: `enabled` на `monitor`, `web`, `app`, `log`;
-- порт: `9100`;
-- `/metrics` возвращает системные метрики;
-- `monitor` успешно получает `/metrics` с `web`, `app`, `log`;
-- Prometheus UI показывает `node (4/4 up)`.
-
-Prometheus labels:
+Для текущей NAT-инфраструктуры выбран подход:
 
 ```text
-instance="localhost:9100", host="monitor", job="node"
-instance="192.168.85.131:9100", host="web", job="node"
-instance="192.168.85.133:9100", host="app", job="node"
-instance="192.168.85.135:9100", host="log", job="node"
+long polling + outbound HTTP proxy
 ```
 
-Концептуально:
+Проверенный proxy path:
 
 ```text
-node_exporter + Prometheus = pull-модель метрик.
-node_exporter отдает endpoint :9100/metrics, Prometheus сам приходит и забирает метрики.
-Promtail + Loki = push-модель логов: Promtail сам отправляет логи в Loki.
+app VM -> 192.168.85.1:10802 -> Windows portproxy -> 127.0.0.1:10801 -> Invisible Man XRay -> Telegram API
 ```
 
-### openipmi
+### Database / PostgreSQL
 
-`openipmi.service` был обнаружен в состоянии `failed` на `web`, `app`, `log`, `monitor`. Он не является частью целевой архитектуры проекта. `openipmi` относится к IPMI/management-интерфейсам физического серверного железа; в текущем lab все узлы являются VM внутри VMware/Proxmox, поэтому настоящего IPMI/BMC-устройства нет и сервис не может подняться в `active`.
+Пока не реализована. Сейчас tickets хранятся в `/opt/app/tickets.json`. Замена на PostgreSQL вынесена в future backlog.
 
-Пакет появился на monitored nodes как побочный элемент monitoring-related установки/collector-набора вокруг node_exporter. На `admin` его нет, потому что `admin` сейчас control node и node_exporter stack на него не ставился.
+## Future improvements
 
-Принятое решение: не удалять пакет, а отключить сервис и сбросить failed-state на `web`, `app`, `log`, `monitor`:
-
-```bash
-sudo systemctl disable --now openipmi.service
-sudo systemctl reset-failed openipmi.service
-```
-
-После этого `openipmi.service` не должен мешать проверкам `systemctl list-units --type=service --state=failed`.
-
-## Dashboard'ы
-
-### Создано
-
-- Infrastructure Overview
-
-Состав `Infrastructure Overview`:
+Все будущие улучшения по logging, monitoring, product alerts, storage, Telegram bot и security собраны в:
 
 ```text
-Targets UP
-Disk Usage by host
-CPU Usage by host
-RAM Usage by host
-Web nginx logs
-App logs
+12_future_improvements_backlog.md
 ```
-
-### Планируется позже
-
-- Web Node Dashboard
-- App Node Dashboard
-- Logs / Observability
-- Loki dashboard
-- Prometheus targets dashboard
-
-## Планируемые alerts
-
-- TargetDown: один из targets Prometheus недоступен;
-- HighDiskUsage: высокий процент использования диска;
-- AppDown или AppHealthFail: backend health endpoint недоступен;
-- LokiDown: Loki `/ready` недоступен;
-- PromtailDown: Promtail не отвечает на служебном порту или нет новых логов.
-
-## Планируемые демонстрационные сценарии
-
-1. Нормальная работа: открыть сайт, дернуть backend, увидеть логи и метрики.
-2. App down: остановить `app.service`, увидеть ошибку, поднять обратно.
-3. Web logs: сгенерировать HTTP-запросы и увидеть nginx logs в Loki.
-4. App logs: сгенерировать HTTP-запросы и увидеть app logs в Loki.
-5. Infrastructure overview: показать состояние всех узлов. Dashboard `Infrastructure Overview` создан; Prometheus видит node targets `4/4 up`, а Grafana показывает UP/CPU/RAM/Disk и web/app logs.
-
-## Обновление: Grafana dashboard Infrastructure Overview
-
-Dashboard `Infrastructure Overview` создан на `monitor` в Grafana.
-
-Используемые источники данных:
-
-```text
-Prometheus: up, CPU, RAM, Disk
-Loki: web nginx logs, app logs
-```
-
-Панели:
-
-```text
-Targets UP
-Disk Usage by host
-CPU Usage by host
-RAM Usage by host
-Web nginx logs
-App logs
-```
-
-Назначение: быстрый обзор состояния всех monitored nodes и свежих логов web/app.
