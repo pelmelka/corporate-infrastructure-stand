@@ -10,7 +10,8 @@
 - Grafana — визуализация метрик и логов;
 - Alertmanager — прием alerts от Prometheus;
 - node_exporter — системные метрики самого `monitor`;
-- сбор системных метрик с `web`, `app`, `log`.
+- сбор системных метрик с `web`, `app`, `log`;
+- сбор product metrics с `supportdesk-api`.
 
 ## Основная информация
 
@@ -35,7 +36,8 @@ prometheus.service
 - порт `9090`;
 - UI доступен: `http://192.168.85.137:9090`;
 - Prometheus видит Alertmanager;
-- Prometheus видит `node (4/4 up)`.
+- Prometheus видит `node (4/4 up)`;
+- Prometheus видит `supportdesk-api (1/1 up)`.
 
 Текущие node targets:
 
@@ -46,7 +48,57 @@ app:     192.168.85.133:9100, host="app"
 log:     192.168.85.135:9100, host="log"
 ```
 
-App `/metrics` scrape пока не добавлен. Это задача этапа Полировка monitoring.
+Текущий app product metrics target:
+
+```text
+job="supportdesk-api"
+instance="192.168.85.133:8080"
+metrics_path="/metrics"
+host="app"
+service="support-desk-api"
+env="lab"
+```
+
+Проверенные product metrics:
+
+```text
+supportdesk_tickets_total
+supportdesk_tickets_open
+supportdesk_tickets_in_progress
+supportdesk_tickets_resolved
+```
+
+## Prometheus alert rules
+
+Rules file:
+
+```text
+/etc/prometheus/supportdesk.rules.yml
+```
+
+В `prometheus.yml` подключен:
+
+```yaml
+rule_files:
+  - /etc/prometheus/supportdesk.rules.yml
+```
+
+Текущие alerts:
+
+```text
+SupportDeskApiDown      critical   up{job="supportdesk-api"} == 0
+TooManyOpenTickets      warning    supportdesk_tickets_open{job="supportdesk-api"} >= 3
+HighDiskUsage           warning    root filesystem usage >80%
+NodeTargetDown          critical   up{job="node"} == 0
+```
+
+Проверено:
+
+- `SupportDeskApiDown` переходит в FIRING при остановке `app.service`;
+- alert доходит до Alertmanager, проверено через `amtool`;
+- `TooManyOpenTickets` переходит в FIRING при open tickets >= 3;
+- `HighDiskUsage` проверен через временный тестовый порог `>20`, затем возвращен на `>80`;
+- `NodeTargetDown` переходит в FIRING при остановке node_exporter на target node.
 
 ## Grafana
 
@@ -82,7 +134,8 @@ prometheus-alertmanager.service
 - active/enabled;
 - порт `9093`;
 - `/ready -> OK`;
-- Prometheus видит Alertmanager.
+- Prometheus видит Alertmanager;
+- alerts доходят до Alertmanager, проверено через `amtool`.
 
 Файл параметров:
 
@@ -96,7 +149,7 @@ prometheus-alertmanager.service
 ARGS="--cluster.listen-address="
 ```
 
-Alert rules пока не создавались.
+Примечание: Debian package Alertmanager не включает полноценный web UI. На `:9093` доступны endpoints/API (`/-/ready`, `/-/healthy`, `/api/v2/alerts`, `/metrics`) и CLI `amtool`.
 
 ## Dashboard Infrastructure Overview
 
@@ -109,20 +162,45 @@ Targets UP
 Disk Usage by host
 CPU Usage by host
 RAM Usage by host
+SupportDesk API UP
+SupportDesk Tickets
+Active Alerts
 Web nginx logs
 App logs
 ```
 
-App logs panel была создана до перехода на `support-desk-api` и рассчитана на старый формат logs. Обновление LogQL под новый `event=...` формат относится к этапу Полировка logging.
+Product panels:
 
-## Product logs после Web/App integration
+```text
+SupportDesk API UP:
+  up{job="supportdesk-api"}
 
-После перехода приложения на Mini Support Desk API Grafana Explore/Loki подтверждает прием новых app product logs.
+SupportDesk Tickets:
+  supportdesk_tickets_total{job="supportdesk-api"}
+  supportdesk_tickets_open{job="supportdesk-api"}
+  supportdesk_tickets_in_progress{job="supportdesk-api"}
+  supportdesk_tickets_resolved{job="supportdesk-api"}
+
+Active Alerts:
+  sum(ALERTS{alertstate="firing"}) or vector(0)
+```
+
+App logs panel использует новый label:
+
+```logql
+{host="app", job="app", service="support-desk-api"}
+| logfmt
+| line_format "{{.event}} | {{.method}} {{.path}} | status={{.status}} | ticket={{.ticket_id}} | {{.old_status}} -> {{.new_status}} | client={{.x_forwarded_for}} | proxy={{.client_ip}}"
+```
+
+## Product logs после logging polish
+
+Grafana/Loki подтверждает прием новых app product logs.
 
 Проверенный запрос:
 
 ```logql
-{host="app", job="app"} |= "support-desk-api"
+{host="app", job="app", service="support-desk-api"}
 ```
 
 Видны события:
@@ -130,14 +208,11 @@ App logs panel была создана до перехода на `support-desk-
 ```text
 event=ticket_created
 event=ticket_status_changed
-event=ticket_list_requested
-event=health_check
-```
-
-Пример строки:
-
-```text
-service=support-desk-api event=ticket_status_changed method=PATCH path=/tickets/6/status status=200 client_ip=192.168.85.131 ticket_id=6 old_status=in_progress new_status=resolved source=web
+event=ticket_status_unchanged
+event=ticket_validation_failed
+event=ticket_not_found
+event=endpoint_not_found
+event=metrics_requested
 ```
 
 ## Текущий статус
@@ -148,6 +223,7 @@ service=support-desk-api event=ticket_status_changed method=PATCH path=/tickets/
 - Grafana active/enabled;
 - Alertmanager active/enabled;
 - node_exporter targets `4/4 up`;
+- supportdesk-api target `1/1 up`;
 - Grafana datasources подключены;
-- Infrastructure Overview создан;
-- Loki/Grafana видит новые product logs от Mini Support Desk.
+- Infrastructure Overview показывает infrastructure metrics, product metrics, active alerts и logs;
+- базовые infrastructure/product alerts созданы и протестированы.
