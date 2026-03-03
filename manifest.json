@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "Web/App integration completed with Mini Support Desk product. web serves frontend and proxies /api/* to app:8080. app runs support-desk-api with tickets.json, product logs and manual /metrics. Loki/Grafana sees support-desk-api product logs. Future improvements centralized in 12_future_improvements_backlog.md.",
-  "last_completed_stage": "Web/App integration: Mini Support Desk frontend on web, support-desk-api backend on app, Nginx reverse proxy /api/* -> app:8080, Browser -> web -> app flow verified, product logs visible in Loki/Grafana",
-  "current_next_stage": "Logging polish: finalize support-desk-api product logs, update Loki/LogQL display for event logs, handle X-Forwarded-For/original client IP and status unchanged behavior. Roadmap keeps stages 1-12 plus optional Telegram bot.",
+  "status": "Logging polish and monitoring polish completed. Mini Support Desk works through web -> app, product logs are visible in Loki/Grafana, app product metrics are scraped by Prometheus, Grafana dashboard shows supportdesk-api health/tickets/active alerts, and alert rules are implemented and tested. Roadmap expanded toward production-like evolution with Admin/Ansible foundation, product model v2, resource/category metrics and alerts, HTTP error-rate metrics, Dockerization, PostgreSQL, DB observability/backups, Telegram bot, hardening, Ansible automation v2, and final README/demo packaging.",
+  "last_completed_stage": "Monitoring polish: app /metrics scrape added, SupportDesk Tickets and SupportDesk API UP panels added, Active Alerts panel added, alerts SupportDeskApiDown, TooManyOpenTickets, HighDiskUsage and NodeTargetDown created and tested",
+  "current_next_stage": "Admin/Ansible foundation: SSH keys to all nodes, full inventory, ansible all ping, Git repo, control-node structure, first operational playbooks",
   "files": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",
@@ -19,5 +19,5 @@
     "11_server_monitor_state.md",
     "12_future_improvements_backlog.md"
   ],
-  "progress_estimate": "engineering readiness 92-94%; demo readiness 90-92%; 8/12 main roadmap stages completed"
+  "progress_estimate": "expanded roadmap formal progress 10/21 stages completed (~48%); core infrastructure lab stages 1-10 completed; engineering readiness for expanded production-like scope 52-58%; current core demo readiness 80-85%"
 }
