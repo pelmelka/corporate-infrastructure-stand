@@ -1,0 +1,8 @@
+---
+- name: Ping all infrastructure nodes
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Check Ansible connection
+      ansible.builtin.ping:

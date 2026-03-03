@@ -1,0 +1,44 @@
+---
+- name: Deploy Prometheus alert rules
+  hosts: monitor_nodes
+  gather_facts: false
+  become: true
+
+  vars:
+    prometheus_rules_src: "{{ playbook_dir }}/../files/prometheus/supportdesk.rules.yml"
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  tasks:
+    - name: Deploy Prometheus rules with validation
+      ansible.builtin.copy:
+        src: "{{ prometheus_rules_src }}"
+        dest: /etc/prometheus/supportdesk.rules.yml
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        validate: "promtool check rules %s"
+      notify: Restart prometheus
+
+    - name: Check Prometheus config syntax
+      ansible.builtin.command: promtool check config /etc/prometheus/prometheus.yml
+      changed_when: false
+
+    - name: Run handlers now if rules changed
+      ansible.builtin.meta: flush_handlers
+
+    - name: Check Prometheus is ready after deploy
+      ansible.builtin.uri:
+        url: http://localhost:9090/-/ready
+        method: GET
+        status_code: 200
+
+  handlers:
+    - name: Restart prometheus
+      ansible.builtin.systemd_service:
+        name: prometheus.service
+        state: restarted

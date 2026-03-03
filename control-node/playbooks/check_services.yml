@@ -1,0 +1,71 @@
+---
+- name: Check web services
+  hosts: web_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check nginx
+      ansible.builtin.command: systemctl is-active nginx.service
+      changed_when: false
+
+    - name: Check promtail
+      ansible.builtin.command: systemctl is-active promtail.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check app services
+  hosts: app_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check app
+      ansible.builtin.command: systemctl is-active app.service
+      changed_when: false
+
+    - name: Check promtail
+      ansible.builtin.command: systemctl is-active promtail.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check log services
+  hosts: log_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check loki
+      ansible.builtin.command: systemctl is-active loki.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check monitor services
+  hosts: monitor_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check prometheus
+      ansible.builtin.command: systemctl is-active prometheus.service
+      changed_when: false
+
+    - name: Check grafana
+      ansible.builtin.command: systemctl is-active grafana-server.service
+      changed_when: false
+
+    - name: Check alertmanager
+      ansible.builtin.command: systemctl is-active prometheus-alertmanager.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false

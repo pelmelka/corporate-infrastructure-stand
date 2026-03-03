@@ -1,0 +1,42 @@
+groups:
+  - name: supportdesk.rules
+    rules:
+      - alert: SupportDeskApiDown
+        expr: up{job="supportdesk-api"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: support-desk-api
+        annotations:
+          summary: "SupportDesk API is down"
+          description: "Prometheus cannot scrape supportdesk-api on {{ $labels.instance }} for more than 30 seconds."
+
+      - alert: TooManyOpenTickets
+        expr: supportdesk_tickets_open{job="supportdesk-api"} >= 3
+        for: 30s
+        labels:
+          severity: warning
+          service: support-desk-api
+        annotations:
+          summary: "Too many open support tickets"
+          description: "There are {{ $value }} open support tickets in Mini Support Desk."
+
+      - alert: HighDiskUsage
+        expr: 100 * (1 - (node_filesystem_avail_bytes{job="node", mountpoint="/", fstype="ext4"} / node_filesystem_size_bytes{job="node", mountpoint="/", fstype="ext4"})) > 80
+        for: 2m
+        labels:
+          severity: warning
+          service: node
+        annotations:
+          summary: "High disk usage on {{ $labels.host }}"
+          description: "Root filesystem on {{ $labels.host }} is {{ printf "%.1f" $value }}% full."
+
+      - alert: NodeTargetDown
+        expr: up{job="node"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: node
+        annotations:
+          summary: "Node target is down: {{ $labels.host }}"
+          description: "Prometheus cannot scrape node_exporter on {{ $labels.host }} at {{ $labels.instance }} for more than 30 seconds."

@@ -1,0 +1,27 @@
+---
+- name: Restart support-desk-api service
+  hosts: app_nodes
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  tasks:
+    - name: Restart app.service
+      ansible.builtin.systemd_service:
+        name: app.service
+        state: restarted
+
+    - name: Check app.service is active
+      ansible.builtin.command: systemctl is-active app.service
+      changed_when: false
+
+    - name: Check local health endpoint
+      ansible.builtin.uri:
+        url: http://localhost:8080/health
+        method: GET
+        status_code: 200
+        return_content: true
