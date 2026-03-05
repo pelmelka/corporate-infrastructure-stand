@@ -2,14 +2,15 @@
 
 ## Назначение
 
-`admin` — управляющий сервер проекта, control node.
+`admin` — управляющий сервер проекта, полноценный Ansible control node.
 
 Роль:
 
 - SSH-подключения к остальным серверам;
 - хранение SSH-ключей;
-- запуск Ansible;
-- хранение inventory, будущих playbook'ов, шаблонов и документации.
+- запуск Ansible ad-hoc команд и playbook'ов;
+- хранение inventory, playbook'ов, файлов, будущих roles/templates/docs;
+- хранение Git-репозитория с Ansible control-node структурой.
 
 ## Основная информация
 
@@ -58,44 +59,7 @@ sudo whoami
 
 Результат: `root`.
 
-## Ansible
-
-Ansible установлен.
-
-```text
-ansible [core 2.19.4]
-python version = 3.13.5
-```
-
-Inventory:
-
-```text
-~/control-node/inventory/hosts.ini
-```
-
-Текущий минимальный inventory:
-
-```ini
-[control]
-admin ansible_connection=local
-
-[all:vars]
-ansible_user=pelmel
-```
-
-Проверка:
-
-```bash
-ansible all -i ./hosts.ini -m ping
-```
-
-Результат:
-
-```text
-admin | SUCCESS => {"changed": false, "ping": "pong"}
-```
-
-Предупреждение про discovered Python interpreter решено оставить как некритичное.
+Важно: SSH key-based login с `admin` на managed nodes работает без пароля, но `sudo`/Ansible `become: true` по-прежнему требует sudo-пароль, если playbook не использует `vars_prompt` или запуск без `-K` не настроен через `NOPASSWD`.
 
 ## SSH-ключи
 
@@ -105,33 +69,213 @@ admin | SUCCESS => {"changed": false, "ping": "pong"}
 ssh-keygen -t ed25519 -C "homelab-admin"
 ```
 
-Файлы:
+Файлы на `admin`:
 
 ```text
 /home/pelmel/.ssh/id_ed25519
 /home/pelmel/.ssh/id_ed25519.pub
 ```
 
-Публичный ключ позже нужно раскатать на `web`, `app`, `log`, `monitor`.
+Публичный ключ раскатан на managed nodes:
+
+```text
+web     192.168.85.131
+app     192.168.85.133
+log     192.168.85.135
+monitor 192.168.85.137
+```
+
+Проверка SSH с `admin`:
+
+```bash
+ssh pelmel@192.168.85.131 "hostname"  # web
+ssh pelmel@192.168.85.133 "hostname"  # app
+ssh pelmel@192.168.85.135 "hostname"  # log
+ssh pelmel@192.168.85.137 "hostname"  # monitor
+```
+
+Результат: все hostnames совпали, вход по SSH-ключу работает.
+
+## Ansible
+
+Ansible установлен.
+
+```text
+ansible [core 2.19.4]
+python version = 3.13.5
+```
+
+Ansible использует проектный конфиг:
+
+```text
+config file = /home/pelmel/control-node/ansible.cfg
+```
+
+Главные файлы:
+
+```text
+~/control-node/ansible.cfg
+~/control-node/inventory/hosts.ini
+~/control-node/playbooks/ping_all.yml
+~/control-node/playbooks/check_services.yml
+~/control-node/playbooks/restart_app.yml
+~/control-node/playbooks/deploy_prometheus_rules.yml
+```
+
+Текущий inventory:
+
+```ini
+[control]
+admin ansible_connection=local
+
+[web_nodes]
+web ansible_host=192.168.85.131
+
+[app_nodes]
+app ansible_host=192.168.85.133
+
+[log_nodes]
+log ansible_host=192.168.85.135
+
+[monitor_nodes]
+monitor ansible_host=192.168.85.137
+
+[managed:children]
+web_nodes
+app_nodes
+log_nodes
+monitor_nodes
+
+[all:vars]
+ansible_user=pelmel
+ansible_python_interpreter=/usr/bin/python3
+```
+
+Группы `web_nodes`, `app_nodes`, `log_nodes`, `monitor_nodes` используются вместо одноименных `[web]`, `[app]`, `[log]`, `[monitor]`, чтобы не было предупреждений Ansible `Found both group and host with same name`.
+
+Текущий `ansible.cfg`:
+
+```ini
+[defaults]
+inventory = inventory/hosts.ini
+remote_user = pelmel
+host_key_checking = False
+interpreter_python = /usr/bin/python3
+retry_files_enabled = False
+
+[privilege_escalation]
+become = False
+```
+
+Проверки:
+
+```bash
+cd ~/control-node
+ansible-inventory --graph
+ansible all -m ping
+ansible managed -m ping
+ansible-playbook playbooks/ping_all.yml
+ansible-playbook playbooks/check_services.yml
+ansible-playbook playbooks/restart_app.yml
+ansible-playbook playbooks/deploy_prometheus_rules.yml
+```
+
+Подтверждено:
+
+- `ansible all -m ping` возвращает `SUCCESS` для `admin`, `web`, `app`, `log`, `monitor`;
+- `ansible managed -m ping` возвращает `SUCCESS` для `web`, `app`, `log`, `monitor`;
+- `ping_all.yml` проходит по всем узлам;
+- `check_services.yml` проверяет ключевые systemd-сервисы без изменений (`changed=0`);
+- `restart_app.yml` перезапускает `app.service`, затем проверяет active status и `http://localhost:8080/health`;
+- `deploy_prometheus_rules.yml` деплоит `/etc/prometheus/supportdesk.rules.yml` на `monitor` с `promtool` validation, проверяет `prometheus.yml`, запускает handlers при изменении rules и проверяет `/-/ready`.
+
+## Operational playbook'и
+
+Текущие playbook'и:
+
+```text
+ping_all.yml                  проверка Ansible-связности всех узлов
+check_services.yml            проверка ключевых сервисов web/app/log/monitor
+restart_app.yml               controlled restart app.service + healthcheck
+deploy_prometheus_rules.yml   деплой Prometheus alert rules + promtool validation + readiness check
+```
+
+`restart_app.yml` и `deploy_prometheus_rules.yml` используют `become: true` и `vars_prompt` для ввода `ansible_become_password`, чтобы не хранить sudo-пароль в файлах проекта.
 
 ## Структура проекта
 
-Создана директория:
+Создана структура:
 
 ```text
-~/control-node
+~/control-node/
+├── ansible.cfg
+├── inventory/
+│   └── hosts.ini
+├── playbooks/
+│   ├── ping_all.yml
+│   ├── check_services.yml
+│   ├── restart_app.yml
+│   └── deploy_prometheus_rules.yml
+├── files/
+│   └── prometheus/
+│       └── supportdesk.rules.yml
+├── roles/
+│   └── .gitkeep
+├── templates/
+│   └── .gitkeep
+└── docs/
+    └── .gitkeep
 ```
 
-Используется:
+`roles/`, `templates/`, `docs/` пока пустые и сохранены в Git через `.gitkeep`, потому что Git не отслеживает пустые директории.
+
+## Git
+
+Git установлен:
 
 ```text
-~/control-node/inventory/hosts.ini
+git version 2.47.3
 ```
 
-Git пока был пропущен.
+В `~/control-node` инициализирован Git repository.
+
+Локальные настройки repo:
+
+```text
+user.name=Pelmel
+user.email=pelmel@homelab.local
+```
+
+Текущая ветка оставлена стандартной:
+
+```text
+master
+```
+
+Сделаны commit'ы:
+
+```text
+cb5794d Add Ansible project directory placeholders
+b98b8f9 initial Ansible control node setup
+```
+
+`git status` после commit'ов показывает:
+
+```text
+nothing to commit, working tree clean
+```
 
 ## Статус
 
-`admin` считается **минимально готовым control node**.
+`admin` считается **готовым Ansible control node foundation**.
 
-Осталось: добавить остальные узлы в inventory, раскатать SSH-ключи, создать playbook'и, возможно инициализировать Git, хранить шаблоны и документацию.
+Завершено:
+
+- SSH key-based доступ с `admin` на `web`, `app`, `log`, `monitor`;
+- полный inventory;
+- `ansible.cfg`;
+- базовая структура `~/control-node`;
+- первые operational playbook'и;
+- Git repo с первыми commit'ами.
+
+Следующий этап проекта: `Product model v2` — resource/category fields, active/resolved tickets, подготовка к `/api/v1/*`.

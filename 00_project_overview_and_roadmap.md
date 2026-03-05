@@ -229,49 +229,69 @@ ticket_status_changed | PATCH /tickets/7/status | status=200 | ticket=7 | open -
 
 # Новый production-like roadmap от текущей точки до финала
 
-## Этап 11. Admin/Ansible foundation — следующий практический этап
+## Этап 11. Admin/Ansible foundation — завершено
 
 Цель: сделать `admin` полноценным control node перед крупными изменениями продукта, БД и Docker.
 
-Что сделать:
+Сделано:
 
 ```text
-1. Раскатать SSH-ключ admin -> web/app/log/monitor.
-2. Расширить inventory:
-   [web]
-   [app]
-   [log]
-   [monitor]
-3. Проверить ansible all -m ping.
-4. Создать структуру ~/control-node:
+1. Раскатан SSH-ключ admin -> web/app/log/monitor.
+2. Проверен SSH-вход с admin на managed nodes без пароля пользователя.
+3. Расширен inventory:
+   [control]
+   [web_nodes]
+   [app_nodes]
+   [log_nodes]
+   [monitor_nodes]
+   [managed:children]
+4. Проверены ansible all -m ping и ansible managed -m ping.
+5. Создана структура ~/control-node:
    inventory/
    playbooks/
    roles/
    templates/
    files/
    docs/
-5. Инициализировать Git.
-6. Добавить ansible.cfg.
-7. Сделать первые playbook'и:
+6. Добавлен ansible.cfg.
+7. Созданы первые playbook'и:
    - ping_all.yml
    - check_services.yml
    - restart_app.yml
    - deploy_prometheus_rules.yml
+8. Инициализирован Git repo.
+9. Сделаны первые commit'ы:
+   - initial Ansible control node setup
+   - Add Ansible project directory placeholders
 ```
 
-Ожидаемый итог:
+Итог:
 
 ```text
-admin перестает быть просто сервером с установленным Ansible и становится рабочим control node.
+admin перестал быть просто сервером с установленным Ansible и стал рабочим control node:
+SSH-доступ, inventory, ansible.cfg, operational playbook'и и Git-история готовы.
 ```
 
 Что теперь можно делать:
 
 ```bash
+cd ~/control-node
 ansible all -m ping
-ansible app -m shell -a "systemctl status app.service --no-pager"
+ansible managed -m ping
+ansible-playbook playbooks/ping_all.yml
 ansible-playbook playbooks/check_services.yml
+ansible-playbook playbooks/restart_app.yml
 ansible-playbook playbooks/deploy_prometheus_rules.yml
+git status
+git log --oneline
+```
+
+Практическая ценность:
+
+```text
+Теперь часть инфраструктурного управления выполняется из одного места через Ansible,
+а состояние control-node файлов фиксируется в Git.
+Это база для будущей автоматизации app/web/promtail/prometheus/db/bot/docker.
 ```
 
 ## Этап 12. Product model v2 — resource/category и active/resolved tickets
@@ -742,8 +762,8 @@ ansible-playbook playbooks/backup_postgres.yml
 # Текущий маркер прогресса
 
 ```text
-Последний завершенный этап: Этап 10. Полировка monitoring.
-Текущий следующий этап: Этап 11. Admin/Ansible foundation.
+Последний завершенный этап: Этап 11. Admin/Ansible foundation.
+Текущий следующий этап: Этап 12. Product model v2.
 Далее: Product model v2, Product observability v2, HTTP/error-rate metrics, Dockerization, PostgreSQL, DB observability, Telegram bot, hardening, Ansible automation v2, final README/demo.
 ```
 
@@ -752,11 +772,12 @@ ansible-playbook playbooks/backup_postgres.yml
 Важно: прогресс пересчитан относительно нового расширенного production-like roadmap. Поэтому процент стал ниже, чем в старом roadmap, где проект был почти завершен по первоначальному scope.
 
 ```text
-Формальная готовность по расширенному roadmap: 10/21 основных этапов завершены ≈ 48%.
+Формальная готовность по расширенному roadmap: 11/21 основных этапов завершены ≈ 52%.
 Готовность core infrastructure lab: 100% по этапам 1–10.
-Инженерная готовность по новому production-like scope: 52–58%.
-Демонстрационная готовность текущего core-проекта: 80–85%.
-Финальная демонстрационная готовность с DB/Docker/Bot/Ansible: 45–55%.
+Admin/Ansible foundation: 100%.
+Инженерная готовность по новому production-like scope: 58–63%.
+Демонстрационная готовность текущего core-проекта: 85–88%.
+Финальная демонстрационная готовность с DB/Docker/Bot/Ansible: 48–58%.
 ```
 
 Разбивка по этапам:
@@ -773,8 +794,8 @@ ansible-playbook playbooks/backup_postgres.yml
 | 8. Web/App integration | завершено | 100% | Mini Support Desk работает через `Browser -> web -> app`. |
 | 9. Полировка logging | завершено | 100% | Product logs, proxy metadata, status unchanged, LogQL/panel, Promtail label. |
 | 10. Полировка monitoring | завершено | 100% | App metrics, product panels, active alerts, alert rules. |
-| 11. Admin/Ansible foundation | следующий этап | 15–25% | `admin` и базовый Ansible есть, но inventory/playbooks еще не готовы. |
-| 12. Product model v2 | план | 0–10% | Resource/category/active-resolved/API v1 еще не реализованы. |
+| 11. Admin/Ansible foundation | завершено | 100% | SSH keys, inventory, ansible.cfg, playbook-и и Git repo готовы. |
+| 12. Product model v2 | следующий этап | 0–10% | Resource/category/active-resolved/API v1 еще не реализованы. |
 | 13. Product observability v2 | план | 0–10% | Metrics/alerts by resource/category еще не реализованы. |
 | 14. HTTP request/error-rate observability | план | 0–10% | Request metrics, latency и error-rate alerts еще не реализованы. |
 | 15. Dockerization | план | 0–5% | Docker пока не внедрен, но добавлен как будущий этап. |
@@ -788,7 +809,7 @@ ansible-playbook playbooks/backup_postgres.yml
 Короткая интерпретация:
 
 ```text
-Проект уже можно демонстрировать как работающий infrastructure lab с web/app/logging/monitoring/alerts.
+Проект уже можно демонстрировать как работающий infrastructure lab с web/app/logging/monitoring/alerts и базовым Ansible control node.
 Новый roadmap расширяет цель до production-like стенда с automation, product model v2, Docker, PostgreSQL, Telegram bot, hardening и финальным demo package.
 ```
 

@@ -278,7 +278,40 @@ curl -s http://192.168.85.131/api/bad-endpoint
 - web nginx logs;
 - app logs.
 
-## Сценарий 12. Future Product incident from resource/category
+## Сценарий 12. Admin/Ansible operational control
+
+Цель: показать, что `admin` работает как Ansible control node и может управлять/проверять инфраструктуру из одного места.
+
+Шаги на `admin`:
+
+```bash
+cd ~/control-node
+ansible-inventory --graph
+ansible managed -m ping
+ansible-playbook playbooks/ping_all.yml
+ansible-playbook playbooks/check_services.yml
+ansible-playbook playbooks/deploy_prometheus_rules.yml
+```
+
+Для controlled restart backend-а:
+
+```bash
+ansible-playbook playbooks/restart_app.yml
+```
+
+Ожидаемый итог:
+
+```text
+inventory показывает control + managed groups
+managed nodes отвечают ping=pong
+check_services.yml возвращает failed=0
+Prometheus rules deploy проходит promtool validation и readiness check
+restart_app.yml перезапускает app.service и проверяет /health
+```
+
+Смысл демонстрации: инфраструктура уже частично управляется как code — через Git-tracked Ansible inventory/playbook'и на `admin`, а не только ручными командами на каждом сервере.
+
+## Сценарий 13. Future Product incident from resource/category
 
 Цель: будущая демонстрация product-level alerting по resource/category.
 
@@ -291,7 +324,7 @@ curl -s http://192.168.85.131/api/bad-endpoint
 
 Этот сценарий пока не реализован. Детали — в roadmap и `12_future_improvements_backlog.md`.
 
-## Сценарий 13. Future Dockerized app
+## Сценарий 14. Future Dockerized app
 
 Цель: будущая демонстрация Docker как способа доставки backend-а.
 
@@ -306,7 +339,7 @@ Promtail продолжает читать /var/log/app/app.log через volum
 
 Ожидаемый итог: меняется способ запуска приложения, но внешний flow и observability остаются стабильными.
 
-## Сценарий 14. Future DB backup/restore
+## Сценарий 15. Future DB backup/restore
 
 Цель: будущая демонстрация stateful service recovery.
 
@@ -318,7 +351,7 @@ Promtail продолжает читать /var/log/app/app.log через volum
 4. Восстановить backup.
 5. Показать, что tickets вернулись.
 
-## Сценарий 15. Future Telegram ticket
+## Сценарий 16. Future Telegram ticket
 
 Цель: будущая демонстрация второго клиента к тому же API.
 

@@ -90,17 +90,27 @@
 - [x] Alert `NodeTargetDown` добавлен и протестирован.
 - [x] Проверено, что Alertmanager получает alert через `amtool`.
 
-## Текущий следующий этап: Admin/Ansible foundation
+## Завершено: Admin/Ansible foundation
 
-- [ ] Раскатать SSH-ключи с `admin` на `web`, `app`, `log`, `monitor`.
-- [ ] Расширить Ansible inventory всеми узлами.
-- [ ] Проверить `ansible all -m ping`.
-- [ ] Создать структуру `~/control-node`: `inventory/`, `playbooks/`, `roles/`, `templates/`, `files/`, `docs/`.
-- [ ] Добавить `ansible.cfg`.
-- [ ] Инициализировать Git.
-- [ ] Создать первые playbook'и: `ping_all.yml`, `check_services.yml`, `restart_app.yml`, `deploy_prometheus_rules.yml`.
+- [x] Раскатаны SSH-ключи с `admin` на `web`, `app`, `log`, `monitor`.
+- [x] Проверен SSH-вход с `admin` на managed nodes без пароля пользователя.
+- [x] Расширен Ansible inventory всеми узлами.
+- [x] Группы inventory приведены к виду `web_nodes`, `app_nodes`, `log_nodes`, `monitor_nodes`, чтобы не было конфликтов имени host/group.
+- [x] Добавлена группа `managed` как children-группа для `web/app/log/monitor`.
+- [x] Проверены `ansible all -m ping` и `ansible managed -m ping`.
+- [x] Создана структура `~/control-node`: `inventory/`, `playbooks/`, `roles/`, `templates/`, `files/`, `docs/`.
+- [x] Добавлен `ansible.cfg`; подтверждено, что Ansible использует `/home/pelmel/control-node/ansible.cfg`.
+- [x] Создан `playbooks/ping_all.yml`.
+- [x] Создан и проверен `playbooks/check_services.yml`.
+- [x] Создан и проверен `playbooks/restart_app.yml` с `become: true`, `vars_prompt`, restart `app.service` и healthcheck.
+- [x] Создан и проверен `playbooks/deploy_prometheus_rules.yml` с `promtool` validation, handler restart Prometheus и readiness check.
+- [x] Локальный source-файл Prometheus rules сохранен в `files/prometheus/supportdesk.rules.yml`.
+- [x] Инициализирован Git repo в `~/control-node`.
+- [x] Настроены локальные Git user.name/user.email.
+- [x] Сделан первый commit `initial Ansible control node setup`.
+- [x] Добавлены `.gitkeep` для пустых директорий `roles/`, `templates/`, `docs/` и сделан commit `Add Ansible project directory placeholders`.
 
-## Далее: Product model v2
+## Текущий следующий этап: Product model v2
 
 - [ ] Заменить/дополнить `Title` на `Resource` dropdown.
 - [ ] Добавить `Category` dropdown.

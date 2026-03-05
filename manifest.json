@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "Logging polish and monitoring polish completed. Mini Support Desk works through web -> app, product logs are visible in Loki/Grafana, app product metrics are scraped by Prometheus, Grafana dashboard shows supportdesk-api health/tickets/active alerts, and alert rules are implemented and tested. Roadmap expanded toward production-like evolution with Admin/Ansible foundation, product model v2, resource/category metrics and alerts, HTTP error-rate metrics, Dockerization, PostgreSQL, DB observability/backups, Telegram bot, hardening, Ansible automation v2, and final README/demo packaging.",
-  "last_completed_stage": "Monitoring polish: app /metrics scrape added, SupportDesk Tickets and SupportDesk API UP panels added, Active Alerts panel added, alerts SupportDeskApiDown, TooManyOpenTickets, HighDiskUsage and NodeTargetDown created and tested",
-  "current_next_stage": "Admin/Ansible foundation: SSH keys to all nodes, full inventory, ansible all ping, Git repo, control-node structure, first operational playbooks",
+  "status": "Logging polish, monitoring polish and Admin/Ansible foundation completed. Mini Support Desk works through web -> app; product logs are visible in Loki/Grafana; app product metrics are scraped by Prometheus; Grafana dashboard and alert rules are implemented/tested; admin is now a working Ansible control node with SSH keys to managed nodes, full inventory, ansible.cfg, operational playbooks and Git history.",
+  "last_completed_stage": "Admin/Ansible foundation: SSH key-based access admin -> web/app/log/monitor, full inventory, ansible all/managed ping, control-node structure, ansible.cfg, playbooks ping_all/check_services/restart_app/deploy_prometheus_rules, Git repo with initial commits",
+  "current_next_stage": "Product model v2: add resource/category fields, active/resolved ticket separation, resolved_at, history-oriented API behavior, prepare /api/v1/* transition",
   "files": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",
@@ -19,5 +19,5 @@
     "11_server_monitor_state.md",
     "12_future_improvements_backlog.md"
   ],
-  "progress_estimate": "expanded roadmap formal progress 10/21 stages completed (~48%); core infrastructure lab stages 1-10 completed; engineering readiness for expanded production-like scope 52-58%; current core demo readiness 80-85%"
+  "progress_estimate": "expanded roadmap formal progress 11/21 stages completed (~52%); core infrastructure lab stages 1-10 completed; Admin/Ansible foundation completed; engineering readiness for expanded production-like scope 58-63%; current core demo readiness 85-88%"
 }

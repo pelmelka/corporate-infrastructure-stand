@@ -23,6 +23,12 @@ Proxmox и все VM сейчас находятся в этой сети чер
 | log | 192.168.85.135 | Loki logging | DHCP сейчас держится стабильно |
 | monitor | 192.168.85.137 | Prometheus/Grafana/Alertmanager | DHCP сейчас держится стабильно |
 
+Future planned:
+
+```text
+db 192.168.85.xxx PostgreSQL
+```
+
 ## Gateway/DNS
 
 Для VM:
@@ -42,6 +48,19 @@ VMnet8 host adapter: 192.168.85.1
 
 Сейчас VM получают IP через DHCP VMware NAT. Для более воспроизводимой инфраструктуры позже нужно сделать DHCP reservation по MAC или статические IP внутри Debian.
 
+Это особенно важно для:
+
+```text
+Promtail clients
+Prometheus targets
+Grafana datasources
+Ansible inventory
+Nginx reverse proxy
+future db server
+future Docker deployment
+future Telegram bot
+```
+
 ## Порты
 
 ```text
@@ -52,6 +71,7 @@ app:     22/tcp, 8080/tcp support-desk-api, 9080/tcp Promtail, 9100/tcp node_exp
 log:     22/tcp, 3100/tcp Loki HTTP, 9095/tcp Loki gRPC, 9100/tcp node_exporter
 monitor: 22/tcp, 3000/tcp Grafana, 9090/tcp Prometheus, 9093/tcp Alertmanager, 9100/tcp node_exporter
 Windows host: 10802/tcp portproxy для будущего Telegram bot outbound proxy
+future db: 22/tcp, 5432/tcp PostgreSQL, 9100/tcp node_exporter, возможно postgres_exporter
 ```
 
 ## Web/App integration network flow
@@ -77,7 +97,54 @@ Reverse proxy:
 /api/* -> http://192.168.85.133:8080/
 ```
 
-Важно: в app logs `client_ip=192.168.85.131`, потому что backend видит Nginx reverse proxy как TCP-клиента. Обработка `X-Real-IP` и `X-Forwarded-For` вынесена в future backlog.
+Важно: в app logs `client_ip=192.168.85.131`, потому что backend видит Nginx reverse proxy как TCP-клиента. Исходный клиент фиксируется через `x_forwarded_for`, обычно `192.168.85.1`.
+
+## Monitoring network flow
+
+Реализовано:
+
+```text
+monitor/Prometheus -> web:9100 node_exporter
+monitor/Prometheus -> app:9100 node_exporter
+monitor/Prometheus -> log:9100 node_exporter
+monitor/Prometheus -> monitor:9100 node_exporter
+monitor/Prometheus -> app:8080/metrics supportdesk-api product metrics
+Prometheus -> Alertmanager localhost:9093
+Grafana -> Prometheus localhost:9090
+Grafana -> Loki 192.168.85.135:3100
+```
+
+## Admin/Ansible management flow
+
+Реализовано:
+
+```text
+admin/Ansible -> web:22 SSH
+admin/Ansible -> app:22 SSH
+admin/Ansible -> log:22 SSH
+admin/Ansible -> monitor:22 SSH
+```
+
+SSH key-based login с `admin` на managed nodes работает без пароля пользователя `pelmel`.
+
+Ansible inventory использует текущие адреса:
+
+```text
+web     ansible_host=192.168.85.131
+app     ansible_host=192.168.85.133
+log     ansible_host=192.168.85.135
+monitor ansible_host=192.168.85.137
+```
+
+Подтверждено:
+
+```bash
+ansible all -m ping
+ansible managed -m ping
+ansible-playbook playbooks/check_services.yml
+```
+
+Результат: `SUCCESS` / `failed=0` для всех актуальных managed nodes.
 
 ## Проверки Web/App связности
 
@@ -89,7 +156,13 @@ curl http://localhost/api/health
 curl http://192.168.85.131/api/health
 ```
 
-Подтверждено: `support-desk-api` отвечает напрямую и через reverse proxy.
+С `monitor`:
+
+```bash
+curl -s http://192.168.85.133:8080/metrics
+```
+
+Подтверждено: `support-desk-api` отвечает напрямую и через reverse proxy, а Prometheus может scrape app `/metrics`.
 
 ## Telegram bot outbound proxy workaround
 
@@ -137,6 +210,24 @@ NO_PROXY=localhost,127.0.0.1,192.168.85.0/24
 ```
 
 Webhook для Telegram в текущей NAT-инфраструктуре не выбирается. Реалистичный вариант: long polling + outbound proxy.
+
+## Future network/security changes
+
+Планируется:
+
+```text
+web -> app только через разрешенный reverse proxy path
+app -> db только к PostgreSQL
+admin -> все узлы по SSH/Ansible
+monitor -> metrics endpoints
+```
+
+Future hardening:
+
+- ограничить прямой доступ к `app:8080`;
+- ограничить доступ к `db:5432`;
+- добавить HTTPS termination на `web`;
+- добавить DHCP reservation/static IP.
 
 ## VPN issue
 

@@ -10,37 +10,282 @@
 admin: ~/control-node/inventory/hosts.ini
 ```
 
-Текущий минимальный вариант:
+Текущий вариант:
 
 ```ini
 [control]
 admin ansible_connection=local
 
-[all:vars]
-ansible_user=pelmel
-```
-
-Будущий вариант:
-
-```ini
-[control]
-admin ansible_connection=local
-
-[web]
+[web_nodes]
 web ansible_host=192.168.85.131
 
-[app]
+[app_nodes]
 app ansible_host=192.168.85.133
 
-[log]
+[log_nodes]
 log ansible_host=192.168.85.135
 
-[monitor]
+[monitor_nodes]
 monitor ansible_host=192.168.85.137
+
+[managed:children]
+web_nodes
+app_nodes
+log_nodes
+monitor_nodes
 
 [all:vars]
 ansible_user=pelmel
+ansible_python_interpreter=/usr/bin/python3
 ```
+
+Примечание: группы названы `*_nodes`, чтобы не создавать конфликт host/group с одинаковым именем (`web`, `app`, `log`, `monitor`).
+
+## Ansible config
+
+Файл:
+
+```text
+admin: ~/control-node/ansible.cfg
+```
+
+Текущий вариант:
+
+```ini
+[defaults]
+inventory = inventory/hosts.ini
+remote_user = pelmel
+host_key_checking = False
+interpreter_python = /usr/bin/python3
+retry_files_enabled = False
+
+[privilege_escalation]
+become = False
+```
+
+Смысл:
+
+- `inventory` позволяет запускать `ansible`/`ansible-playbook` без `-i inventory/hosts.ini` из `~/control-node`;
+- `remote_user = pelmel` задает SSH-пользователя по умолчанию;
+- `interpreter_python = /usr/bin/python3` фиксирует Python на managed nodes;
+- `become = False` оставляет root escalation выключенным по умолчанию; playbook'и, которым нужен root, явно задают `become: true`.
+
+## Ansible playbook: ping_all.yml
+
+Файл:
+
+```text
+admin: ~/control-node/playbooks/ping_all.yml
+```
+
+Текущий вариант:
+
+```yaml
+---
+- name: Ping all infrastructure nodes
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Check Ansible connection
+      ansible.builtin.ping:
+```
+
+## Ansible playbook: check_services.yml
+
+Файл:
+
+```text
+admin: ~/control-node/playbooks/check_services.yml
+```
+
+Текущий вариант:
+
+```yaml
+---
+- name: Check web services
+  hosts: web_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check nginx
+      ansible.builtin.command: systemctl is-active nginx.service
+      changed_when: false
+
+    - name: Check promtail
+      ansible.builtin.command: systemctl is-active promtail.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check app services
+  hosts: app_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check app
+      ansible.builtin.command: systemctl is-active app.service
+      changed_when: false
+
+    - name: Check promtail
+      ansible.builtin.command: systemctl is-active promtail.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check log services
+  hosts: log_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check loki
+      ansible.builtin.command: systemctl is-active loki.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check monitor services
+  hosts: monitor_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check prometheus
+      ansible.builtin.command: systemctl is-active prometheus.service
+      changed_when: false
+
+    - name: Check grafana
+      ansible.builtin.command: systemctl is-active grafana-server.service
+      changed_when: false
+
+    - name: Check alertmanager
+      ansible.builtin.command: systemctl is-active prometheus-alertmanager.service
+      changed_when: false
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+```
+
+## Ansible playbook: restart_app.yml
+
+Файл:
+
+```text
+admin: ~/control-node/playbooks/restart_app.yml
+```
+
+Текущий вариант:
+
+```yaml
+---
+- name: Restart support-desk-api service
+  hosts: app_nodes
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  tasks:
+    - name: Restart app.service
+      ansible.builtin.systemd_service:
+        name: app.service
+        state: restarted
+
+    - name: Check app.service is active
+      ansible.builtin.command: systemctl is-active app.service
+      changed_when: false
+
+    - name: Check local health endpoint
+      ansible.builtin.uri:
+        url: http://localhost:8080/health
+        method: GET
+        status_code: 200
+        return_content: true
+```
+
+## Ansible playbook: deploy_prometheus_rules.yml
+
+Файл:
+
+```text
+admin: ~/control-node/playbooks/deploy_prometheus_rules.yml
+```
+
+Локальный source-файл rules:
+
+```text
+admin: ~/control-node/files/prometheus/supportdesk.rules.yml
+```
+
+Текущий вариант:
+
+```yaml
+---
+- name: Deploy Prometheus alert rules
+  hosts: monitor_nodes
+  gather_facts: false
+  become: true
+
+  vars:
+    prometheus_rules_src: "{{ playbook_dir }}/../files/prometheus/supportdesk.rules.yml"
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  tasks:
+    - name: Deploy Prometheus rules with validation
+      ansible.builtin.copy:
+        src: "{{ prometheus_rules_src }}"
+        dest: /etc/prometheus/supportdesk.rules.yml
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        validate: "promtool check rules %s"
+      notify: Restart prometheus
+
+    - name: Check Prometheus config syntax
+      ansible.builtin.command: promtool check config /etc/prometheus/prometheus.yml
+      changed_when: false
+
+    - name: Run handlers now if rules changed
+      ansible.builtin.meta: flush_handlers
+
+    - name: Check Prometheus is ready after deploy
+      ansible.builtin.uri:
+        url: http://localhost:9090/-/ready
+        method: GET
+        status_code: 200
+
+  handlers:
+    - name: Restart prometheus
+      ansible.builtin.systemd_service:
+        name: prometheus.service
+        state: restarted
+```
+
+Особенности:
+
+- `src` у `copy` — локальный файл на `admin`;
+- `dest` — файл на `monitor`;
+- `validate: "promtool check rules %s"` проверяет новый rules-файл до замены рабочего файла;
+- `backup: true` создает backup старого файла на `monitor`, если файл реально изменился;
+- `notify` вызывает handler только при `changed`;
+- `meta: flush_handlers` запускает handler до readiness-check, чтобы проверять Prometheus уже после возможного restart.
 
 ## Loki config
 
