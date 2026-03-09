@@ -63,13 +63,6 @@ retry_files_enabled = False
 become = False
 ```
 
-Смысл:
-
-- `inventory` позволяет запускать `ansible`/`ansible-playbook` без `-i inventory/hosts.ini` из `~/control-node`;
-- `remote_user = pelmel` задает SSH-пользователя по умолчанию;
-- `interpreter_python = /usr/bin/python3` фиксирует Python на managed nodes;
-- `become = False` оставляет root escalation выключенным по умолчанию; playbook'и, которым нужен root, явно задают `become: true`.
-
 ## Ansible playbook: ping_all.yml
 
 Файл:
@@ -77,8 +70,6 @@ become = False
 ```text
 admin: ~/control-node/playbooks/ping_all.yml
 ```
-
-Текущий вариант:
 
 ```yaml
 ---
@@ -98,8 +89,6 @@ admin: ~/control-node/playbooks/ping_all.yml
 ```text
 admin: ~/control-node/playbooks/check_services.yml
 ```
-
-Текущий вариант:
 
 ```yaml
 ---
@@ -183,8 +172,6 @@ admin: ~/control-node/playbooks/check_services.yml
 admin: ~/control-node/playbooks/restart_app.yml
 ```
 
-Текущий вариант:
-
 ```yaml
 ---
 - name: Restart support-desk-api service
@@ -215,6 +202,8 @@ admin: ~/control-node/playbooks/restart_app.yml
         return_content: true
 ```
 
+Примечание: playbook пока называется универсально и перезапускает `app.service`. После Product model v2 сервис внутри приложения называется `misis-digital-student-support-api`, но systemd unit остался `app.service`.
+
 ## Ansible playbook: deploy_prometheus_rules.yml
 
 Файл:
@@ -228,8 +217,6 @@ admin: ~/control-node/playbooks/deploy_prometheus_rules.yml
 ```text
 admin: ~/control-node/files/prometheus/supportdesk.rules.yml
 ```
-
-Текущий вариант:
 
 ```yaml
 ---
@@ -277,15 +264,6 @@ admin: ~/control-node/files/prometheus/supportdesk.rules.yml
         name: prometheus.service
         state: restarted
 ```
-
-Особенности:
-
-- `src` у `copy` — локальный файл на `admin`;
-- `dest` — файл на `monitor`;
-- `validate: "promtool check rules %s"` проверяет новый rules-файл до замены рабочего файла;
-- `backup: true` создает backup старого файла на `monitor`, если файл реально изменился;
-- `notify` вызывает handler только при `changed`;
-- `meta: flush_handlers` запускает handler до readiness-check, чтобы проверять Prometheus уже после возможного restart.
 
 ## Loki config
 
@@ -343,7 +321,7 @@ scrape_configs:
 app: /etc/promtail/config.yml
 ```
 
-Важный фрагмент:
+Текущий вариант после Product model v2:
 
 ```yaml
 clients:
@@ -351,18 +329,28 @@ clients:
 
 scrape_configs:
   - job_name: app
+    pipeline_stages:
+      - regex:
+          expression: '(^|.*\s)category=(?P<category>[a-z0-9-]+)(\s|$)'
+      - labels:
+          category:
+
     static_configs:
       - targets:
           - localhost
         labels:
           host: app
           job: app
-          service: support-desk-api
+          service: misis-digital-student-support-api
           env: lab
           __path__: /var/log/app/*.log
 ```
 
-Примечание: после logging polish Promtail label для app приведен к актуальному значению `service=support-desk-api`. Старые строки в Loki могут оставаться с label `service=python-backend`, новые идут с новым label.
+Особенности:
+
+- static label `service` изменен на `misis-digital-student-support-api`;
+- `category` извлекается из app log line и становится dynamic Loki label;
+- `resource` пока остается полем строки и фильтруется через LogQL `|= "resource=..."` или `| logfmt`.
 
 ## Prometheus config
 
@@ -420,7 +408,7 @@ scrape_configs:
           env: lab
 ```
 
-App `/metrics` scrape добавлен и проверен: target `supportdesk-api` показывает `1/1 up`.
+Примечание: Prometheus job/label `supportdesk-api` пока сохранен для совместимости с существующими panels и alerts, хотя приложение теперь называется `misis-digital-student-support-api`.
 
 ## Prometheus alert rules
 
@@ -454,7 +442,7 @@ groups:
           service: support-desk-api
         annotations:
           summary: "Too many open support tickets"
-          description: "There are {{ $value }} open support tickets in Mini Support Desk."
+          description: "There are {{ $value }} open support tickets in MISIS_Digital Student Support."
 
       - alert: HighDiskUsage
         expr: 100 * (1 - (node_filesystem_avail_bytes{job="node", mountpoint="/", fstype="ext4"} / node_filesystem_size_bytes{job="node", mountpoint="/", fstype="ext4"})) > 80
@@ -464,7 +452,7 @@ groups:
           service: node
         annotations:
           summary: "High disk usage on {{ $labels.host }}"
-          description: "Root filesystem on {{ $labels.host }} is {{ printf \"%.1f\" $value }}% full."
+          description: "Root filesystem on {{ $labels.host }} is {{ printf "%.1f" $value }}% full."
 
       - alert: NodeTargetDown
         expr: up{job="node"} == 0
@@ -477,7 +465,7 @@ groups:
           description: "Prometheus cannot scrape node_exporter on {{ $labels.host }} at {{ $labels.instance }} for more than 30 seconds."
 ```
 
-Проверено:
+Проверено до Product model v2:
 
 - `SupportDeskApiDown` срабатывает при остановке `app.service`;
 - `TooManyOpenTickets` срабатывает при `supportdesk_tickets_open >= 3`;
@@ -528,7 +516,7 @@ Disk Usage by host
 CPU Usage by host
 RAM Usage by host
 SupportDesk API UP
-SupportDesk Tickets
+SupportDesk Tickets / Student Support Tickets
 Active Alerts
 Web nginx logs
 App logs
@@ -545,6 +533,7 @@ supportdesk_tickets_total{job="supportdesk-api"}
 supportdesk_tickets_open{job="supportdesk-api"}
 supportdesk_tickets_in_progress{job="supportdesk-api"}
 supportdesk_tickets_resolved{job="supportdesk-api"}
+supportdesk_tickets_active{job="supportdesk-api"}
 ```
 
 Active Alerts panel:
@@ -556,14 +545,14 @@ sum(ALERTS{alertstate="firing"}) or vector(0)
 App logs panel query:
 
 ```logql
-{host="app", job="app", service="support-desk-api"}
+{host="app", job="app", service="misis-digital-student-support-api"}
 | logfmt
-| line_format "{{.event}} | {{.method}} {{.path}} | status={{.status}} | ticket={{.ticket_id}} | {{.old_status}} -> {{.new_status}} | client={{.x_forwarded_for}} | proxy={{.client_ip}}"
+| line_format "{{.event}} | {{.method}} {{.path}} | status={{.status}} | category={{.category}} | resource={{.resource}} | ticket={{.ticket_id}} | {{.old_status}} -> {{.new_status}} | client={{.x_forwarded_for}} | proxy={{.client_ip}}"
 ```
 
-Примечание: после подключения Prometheus scrape в App logs появляются `metrics_requested | GET /metrics`; это ожидаемый шум от мониторинга и пока оставлено без изменений.
+Примечание: `ticket_list_requested` сознательно оставлен в panel, потому что показывает, что UI реально ходит в backend за списком заявок.
 
-## Nginx reverse proxy для Mini Support Desk
+## Nginx reverse proxy для MISIS_Digital Student Support
 
 Файл:
 
@@ -592,16 +581,7 @@ location /api/ {
 }
 ```
 
-Mapping:
-
-```text
-/api/health              -> /health
-/api/tickets             -> /tickets
-/api/tickets/<id>/status -> /tickets/<id>/status
-/api/metrics             -> /metrics
-```
-
-## Mini Support Desk frontend
+## MISIS_Digital Student Support frontend
 
 Файл:
 
@@ -609,20 +589,25 @@ Mapping:
 web: /var/www/html/index.html
 ```
 
-Backup:
+Backup-и:
 
 ```text
 web: /var/www/html/index.html.bak-before-supportdesk
+web: /var/www/html/index.html.bak-before-misis-digital-v2
 ```
 
 Функциональность:
 
-- `GET /api/health`;
-- `GET /api/tickets`;
-- `POST /api/tickets`;
-- `PATCH /api/tickets/<id>/status`;
-- Last API response;
-- backend UTC time + browser local time.
+- `GET /api/v1/health`;
+- `GET /api/v1/support-model`;
+- `GET /api/v1/tickets`;
+- `GET /api/v1/tickets?status=resolved`;
+- `GET /api/v1/tickets/all`;
+- `POST /api/v1/tickets`;
+- `PATCH /api/v1/tickets/<id>/status`;
+- dynamic dropdown: `category -> resource`;
+- active/resolved/all tabs;
+- Last API response.
 
 ### Полный текущий код `/var/www/html/index.html`
 
@@ -631,7 +616,7 @@ web: /var/www/html/index.html.bak-before-supportdesk
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Mini Support Desk</title>
+    <title>MISIS_Digital Student Support</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <style>
@@ -659,14 +644,14 @@ web: /var/www/html/index.html.bak-before-supportdesk
         }
 
         main {
-            max-width: 1100px;
+            max-width: 1150px;
             margin: 28px auto;
             padding: 0 20px;
         }
 
         .grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1.2fr;
             gap: 24px;
         }
 
@@ -699,7 +684,7 @@ web: /var/www/html/index.html.bak-before-supportdesk
         }
 
         textarea {
-            min-height: 90px;
+            min-height: 95px;
         }
 
         button {
@@ -726,6 +711,36 @@ web: /var/www/html/index.html.bak-before-supportdesk
             background: #334155;
         }
 
+        .danger {
+            background: #dc2626;
+        }
+
+        .danger:hover {
+            background: #b91c1c;
+        }
+
+        .full-width {
+            margin-top: 24px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            background: #e2e8f0;
+            color: #1f2933;
+            margin-top: 0;
+        }
+
+        .tab.active {
+            background: #2563eb;
+            color: white;
+        }
+
         .ticket {
             border: 1px solid #e2e8f0;
             border-radius: 10px;
@@ -739,31 +754,41 @@ web: /var/www/html/index.html.bak-before-supportdesk
             font-size: 17px;
         }
 
-        .meta {
+        .description {
             margin-top: 8px;
-            font-size: 14px;
-            color: #64748b;
         }
 
-        .status {
+        .meta {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #64748b;
+            line-height: 1.6;
+        }
+
+        .pill {
             display: inline-block;
             padding: 4px 8px;
             border-radius: 999px;
             font-size: 13px;
             font-weight: bold;
+            margin-right: 6px;
             background: #e0f2fe;
             color: #0369a1;
         }
 
         .priority {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 999px;
-            font-size: 13px;
-            font-weight: bold;
             background: #fee2e2;
             color: #991b1b;
-            margin-left: 6px;
+        }
+
+        .category {
+            background: #ede9fe;
+            color: #5b21b6;
+        }
+
+        .resource {
+            background: #dcfce7;
+            color: #166534;
         }
 
         .health-ok {
@@ -776,10 +801,6 @@ web: /var/www/html/index.html.bak-before-supportdesk
             font-weight: bold;
         }
 
-        .full-width {
-            margin-top: 24px;
-        }
-
         pre {
             background: #0f172a;
             color: #e2e8f0;
@@ -788,7 +809,13 @@ web: /var/www/html/index.html.bak-before-supportdesk
             overflow-x: auto;
         }
 
-        @media (max-width: 800px) {
+        .hint {
+            color: #64748b;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+
+        @media (max-width: 850px) {
             .grid {
                 grid-template-columns: 1fr;
             }
@@ -802,8 +829,8 @@ web: /var/www/html/index.html.bak-before-supportdesk
 
 <body>
 <header>
-    <h1>Mini Support Desk</h1>
-    <p>Demo product for Mini Corporate Infrastructure Lab: Browser → web/Nginx → app/API</p>
+    <h1>MISIS_Digital Student Support</h1>
+    <p>Support portal for MISIS digital student services: LMS, personal account, dormitory portal, events, library, career and payments.</p>
 </header>
 
 <main>
@@ -812,17 +839,18 @@ web: /var/www/html/index.html.bak-before-supportdesk
             <h2>Backend status</h2>
             <p id="health">Checking backend...</p>
             <button onclick="loadHealth()">Refresh health</button>
-            <button class="secondary" onclick="loadTickets()">Refresh tickets</button>
+            <button class="secondary" onclick="loadTickets(currentFilter)">Refresh tickets</button>
         </section>
 
         <section class="card">
-            <h2>Create ticket</h2>
+            <h2>Create support request</h2>
 
-            <label for="title">Title</label>
-            <input id="title" placeholder="Example: Cannot access Grafana">
+            <label for="category">Digital service</label>
+            <select id="category" onchange="onCategoryChange()"></select>
+            <div class="hint">Choose the university digital service where the problem happened.</div>
 
-            <label for="description">Description</label>
-            <textarea id="description" placeholder="Describe the issue"></textarea>
+            <label for="resource">Service section</label>
+            <select id="resource"></select>
 
             <label for="priority">Priority</label>
             <select id="priority">
@@ -832,12 +860,23 @@ web: /var/www/html/index.html.bak-before-supportdesk
                 <option value="critical">critical</option>
             </select>
 
+            <label for="description">Description</label>
+            <textarea id="description" placeholder="Describe what happened. Example: В расписании отображается неправильная аудитория"></textarea>
+
             <button onclick="createTicket()">Create ticket</button>
         </section>
     </div>
 
     <section class="card full-width">
         <h2>Tickets</h2>
+
+        <div class="tabs">
+            <button id="tab-active" class="tab active" onclick="loadTickets('active')">Active</button>
+            <button id="tab-resolved" class="tab" onclick="loadTickets('resolved')">Resolved</button>
+            <button id="tab-all" class="tab" onclick="loadTickets('all')">All</button>
+        </div>
+
+        <div id="summary" class="hint">Loading summary...</div>
         <div id="tickets">Loading tickets...</div>
     </section>
 
@@ -848,19 +887,25 @@ web: /var/www/html/index.html.bak-before-supportdesk
 </main>
 
 <script>
+    let supportModel = null;
+    let currentFilter = "active";
+
     async function loadHealth() {
         const healthEl = document.getElementById("health");
+
         try {
-            const response = await fetch("/api/health");
+            const response = await fetch("/api/v1/health");
             const data = await response.json();
             const backendTime = new Date(data.time);
 
             healthEl.innerHTML = `
                 <span class="health-ok">OK</span><br>
-                Service: ${data.service}<br>
-                Version: ${data.version}<br>
-                Environment: ${data.environment}<br>
-                Backend time UTC: ${data.time}<br>
+                Product: ${escapeHtml(data.product)}<br>
+                Service: ${escapeHtml(data.service)}<br>
+                Version: ${escapeHtml(data.version)}<br>
+                Environment: ${escapeHtml(data.environment)}<br>
+                API version: ${escapeHtml(data.api_version)}<br>
+                Backend time UTC: ${escapeHtml(data.time)}<br>
                 Your local time: ${backendTime.toLocaleString()}
             `;
 
@@ -871,33 +916,67 @@ web: /var/www/html/index.html.bak-before-supportdesk
         }
     }
 
-    async function loadTickets() {
+    async function loadSupportModel() {
+        const response = await fetch("/api/v1/support-model");
+        supportModel = await response.json();
+
+        const categorySelect = document.getElementById("category");
+        categorySelect.innerHTML = supportModel.categories.map(category => `
+            <option value="${escapeHtml(category.value)}">${escapeHtml(category.label)}</option>
+        `).join("");
+
+        onCategoryChange();
+    }
+
+    function onCategoryChange() {
+        const categoryValue = document.getElementById("category").value;
+        const resourceSelect = document.getElementById("resource");
+        const category = supportModel.categories.find(item => item.value === categoryValue);
+
+        if (!category) {
+            resourceSelect.innerHTML = "";
+            return;
+        }
+
+        resourceSelect.innerHTML = category.resources.map(resource => `
+            <option value="${escapeHtml(resource.value)}">${escapeHtml(resource.label)}</option>
+        `).join("");
+    }
+
+    async function loadTickets(filter = "active") {
+        currentFilter = filter;
+        setActiveTab(filter);
+
         const ticketsEl = document.getElementById("tickets");
+        const summaryEl = document.getElementById("summary");
 
         try {
-            const response = await fetch("/api/tickets");
+            let url = "/api/v1/tickets";
+            if (filter === "resolved") {
+                url = "/api/v1/tickets?status=resolved";
+            } else if (filter === "all") {
+                url = "/api/v1/tickets/all";
+            }
+
+            const response = await fetch(url);
             const data = await response.json();
 
+            summaryEl.innerHTML = `
+                Filter: <b>${escapeHtml(data.filter)}</b> |
+                Active: <b>${data.active_count}</b> |
+                Open: <b>${data.open_count}</b> |
+                In progress: <b>${data.in_progress_count}</b> |
+                Resolved: <b>${data.resolved_count}</b> |
+                Total: <b>${data.total}</b>
+            `;
+
             if (!data.tickets || data.tickets.length === 0) {
-                ticketsEl.innerHTML = "No tickets yet.";
+                ticketsEl.innerHTML = "No tickets in this view.";
+                showResponse(data);
                 return;
             }
 
-            ticketsEl.innerHTML = data.tickets.map(ticket => `
-                <div class="ticket">
-                    <div class="ticket-title">#${ticket.id} ${escapeHtml(ticket.title)}</div>
-                    <div>${escapeHtml(ticket.description || "")}</div>
-                    <div class="meta">
-                        <span class="status">${ticket.status}</span>
-                        <span class="priority">${ticket.priority}</span>
-                        source=${ticket.source}
-                    </div>
-                    <button onclick="changeStatus(${ticket.id}, 'open')">Open</button>
-                    <button onclick="changeStatus(${ticket.id}, 'in_progress')">In progress</button>
-                    <button onclick="changeStatus(${ticket.id}, 'resolved')">Resolved</button>
-                </div>
-            `).join("");
-
+            ticketsEl.innerHTML = data.tickets.map(ticket => renderTicket(ticket)).join("");
             showResponse(data);
         } catch (error) {
             ticketsEl.innerHTML = "Failed to load tickets.";
@@ -905,24 +984,72 @@ web: /var/www/html/index.html.bak-before-supportdesk
         }
     }
 
-    async function createTicket() {
-        const title = document.getElementById("title").value.trim();
-        const description = document.getElementById("description").value.trim();
-        const priority = document.getElementById("priority").value;
+    function renderTicket(ticket) {
+        const resolvedInfo = ticket.resolved_at
+            ? `<br>Resolved at: ${escapeHtml(ticket.resolved_at)}`
+            : "";
 
-        if (!title) {
-            alert("Title is required");
+        const actionButtons = ticket.status === "resolved"
+            ? `
+                <button onclick="changeStatus(${ticket.id}, 'open')">Reopen</button>
+              `
+            : `
+                <button onclick="changeStatus(${ticket.id}, 'open')">Open</button>
+                <button onclick="changeStatus(${ticket.id}, 'in_progress')">In progress</button>
+                <button class="danger" onclick="changeStatus(${ticket.id}, 'resolved')">Resolved</button>
+              `;
+
+        return `
+            <div class="ticket">
+                <div class="ticket-title">#${ticket.id} ${escapeHtml(ticket.title)}</div>
+                <div class="description">${escapeHtml(ticket.description || "")}</div>
+
+                <div class="meta">
+                    <span class="pill">${escapeHtml(ticket.status)}</span>
+                    <span class="pill priority">${escapeHtml(ticket.priority)}</span>
+                    <span class="pill category">${escapeHtml(ticket.category_label || ticket.category)}</span>
+                    <span class="pill resource">${escapeHtml(ticket.resource_label || ticket.resource)}</span>
+                    <br>
+                    source=${escapeHtml(ticket.source)}
+                    | category=${escapeHtml(ticket.category)}
+                    | resource=${escapeHtml(ticket.resource)}
+                    <br>
+                    Created at: ${escapeHtml(ticket.created_at)}
+                    <br>
+                    Updated at: ${escapeHtml(ticket.updated_at)}
+                    ${resolvedInfo}
+                </div>
+
+                ${actionButtons}
+            </div>
+        `;
+    }
+
+    async function createTicket() {
+        const category = document.getElementById("category").value;
+        const resource = document.getElementById("resource").value;
+        const priority = document.getElementById("priority").value;
+        const description = document.getElementById("description").value.trim();
+
+        if (!category || !resource) {
+            alert("Choose digital service and service section");
+            return;
+        }
+
+        if (!description) {
+            alert("Description is required");
             return;
         }
 
         const payload = {
-            title: title,
-            description: description,
+            category: category,
+            resource: resource,
             priority: priority,
+            description: description,
             source: "web"
         };
 
-        const response = await fetch("/api/tickets", {
+        const response = await fetch("/api/v1/tickets", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -933,14 +1060,17 @@ web: /var/www/html/index.html.bak-before-supportdesk
         const data = await response.json();
         showResponse(data);
 
-        document.getElementById("title").value = "";
-        document.getElementById("description").value = "";
+        if (!response.ok) {
+            alert(`Failed to create ticket: ${data.error || response.status}`);
+            return;
+        }
 
-        await loadTickets();
+        document.getElementById("description").value = "";
+        await loadTickets("active");
     }
 
     async function changeStatus(ticketId, status) {
-        const response = await fetch(`/api/tickets/${ticketId}/status`, {
+        const response = await fetch(`/api/v1/tickets/${ticketId}/status`, {
             method: "PATCH",
             headers: {
                 "Content-Type": "application/json"
@@ -953,7 +1083,22 @@ web: /var/www/html/index.html.bak-before-supportdesk
 
         const data = await response.json();
         showResponse(data);
-        await loadTickets();
+
+        if (!response.ok) {
+            alert(`Failed to change status: ${data.error || response.status}`);
+            return;
+        }
+
+        await loadTickets(currentFilter);
+    }
+
+    function setActiveTab(filter) {
+        for (const value of ["active", "resolved", "all"]) {
+            const tab = document.getElementById(`tab-${value}`);
+            if (tab) {
+                tab.classList.toggle("active", value === filter);
+            }
+        }
     }
 
     function showResponse(data) {
@@ -970,14 +1115,20 @@ web: /var/www/html/index.html.bak-before-supportdesk
             .replaceAll("'", "&#039;");
     }
 
-    loadHealth();
-    loadTickets();
+    async function init() {
+        await loadSupportModel();
+        await loadHealth();
+        await loadTickets("active");
+    }
+
+    init();
 </script>
 </body>
 </html>
+
 ```
 
-## Mini Support Desk backend
+## MISIS_Digital Student Support backend
 
 Файл:
 
@@ -985,11 +1136,12 @@ web: /var/www/html/index.html.bak-before-supportdesk
 app: /opt/app/app.py
 ```
 
-Backup:
+Backup-и:
 
 ```text
 app: /opt/app/app.py.bak-before-supportdesk
-/opt/app/app.py.bak-before-logging-polish
+app: /opt/app/app.py.bak-before-logging-polish
+app: /opt/app/app.py.bak-before-product-model-v2
 ```
 
 Данные:
@@ -998,14 +1150,28 @@ app: /opt/app/app.py.bak-before-supportdesk
 app: /opt/app/tickets.json
 ```
 
+Backup старых заявок:
+
+```text
+app: /opt/app/tickets.json.bak-before-product-model-v2-...
+```
+
 Endpoints:
 
 ```text
 GET    /health
+GET    /v1/health
+GET    /v1/support-model
 GET    /tickets
-POST   /tickets
+GET    /v1/tickets
+GET    /tickets/all
+GET    /v1/tickets/all
 GET    /tickets/<id>
+GET    /v1/tickets/<id>
+POST   /tickets
+POST   /v1/tickets
 PATCH  /tickets/<id>/status
+PATCH  /v1/tickets/<id>/status
 GET    /metrics
 ```
 
@@ -1016,35 +1182,177 @@ supportdesk_tickets_total
 supportdesk_tickets_open
 supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
+supportdesk_tickets_active
 ```
 
 ### Полный текущий код `/opt/app/app.py`
 
 ```python
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timezone
 import json
 import logging
 import os
 import re
-import time
 
 HOST = "0.0.0.0"
 PORT = 8080
 
-SERVICE_NAME = "support-desk-api"
-SERVICE_VERSION = "1.0.0"
+PRODUCT_NAME = "MISIS_Digital Student Support"
+SERVICE_NAME = "misis-digital-student-support-api"
+SERVICE_VERSION = "1.1.0"
 ENVIRONMENT = "lab"
 
 LOG_FILE = "/var/log/app/app.log"
 DATA_FILE = "/opt/app/tickets.json"
+MAX_BODY_BYTES = 64 * 1024
 
+STATUS_VALUES = ["open", "in_progress", "resolved"]
+ACTIVE_STATUSES = ["open", "in_progress"]
+PRIORITY_VALUES = ["low", "normal", "high", "critical"]
+
+CATEGORY_LABELS = {
+    "newlms-misis": "newlms.misis.ru",
+    "lk-misis": "lk.misis.ru",
+    "gornyak-misis": "gornyak.misis.ru",
+    "folio-misis": "folio.misis.ru",
+    "pulse-misis": "pulse.misis.ru",
+    "vector-misis": "vector.misis.ru",
+    "pay-misis": "pay.misis.ru",
+}
+
+RESOURCE_LABELS = {
+    "login": "Login",
+    "courses": "Courses",
+    "schedule": "Schedule",
+    "assignments": "Assignments",
+    "tests": "Tests",
+    "grades": "Grades",
+    "files": "Files",
+    "notifications": "Notifications",
+    "video-lessons": "Video lessons",
+
+    "gradebook": "Electronic gradebook",
+    "attendance": "Attendance journal",
+    "service-requests": "Service requests",
+    "study-certificate": "Study certificate",
+    "academic-leave": "Academic leave",
+    "diploma-documents": "Diploma documents",
+    "personal-data": "Personal data",
+
+    "dorm-payment": "Dormitory payment",
+    "cleaning-request": "Cleaning request",
+    "plumber-request": "Plumber request",
+    "electrician-request": "Electrician request",
+    "commandant-appointment": "Commandant appointment",
+    "room-info": "Room information",
+    "documents": "Documents",
+
+    "book-search": "Book search",
+    "digital-books": "Digital books",
+    "article-access": "Article access",
+    "book-reservation": "Book reservation",
+    "return-deadline": "Return deadline",
+    "reader-profile": "Reader profile",
+
+    "event-list": "Event list",
+    "event-registration": "Event registration",
+    "qr-ticket": "QR ticket",
+    "event-reminders": "Event reminders",
+    "attendance-check": "Attendance check",
+    "certificates": "Certificates",
+    "event-feedback": "Event feedback",
+
+    "internships": "Internships",
+    "vacancies": "Vacancies",
+    "practice-documents": "Practice documents",
+    "company-events": "Company events",
+    "resume-upload": "Resume upload",
+    "application-status": "Application status",
+    "career-consultation": "Career consultation",
+
+    "tuition-payment": "Tuition payment",
+    "invoice": "Invoice",
+    "payment-status": "Payment status",
+    "refund": "Refund",
+    "receipt": "Receipt",
+}
+
+CATEGORY_TO_RESOURCES = {
+    "newlms-misis": [
+        "login",
+        "courses",
+        "schedule",
+        "assignments",
+        "tests",
+        "grades",
+        "files",
+        "notifications",
+        "video-lessons",
+    ],
+    "lk-misis": [
+        "login",
+        "gradebook",
+        "attendance",
+        "service-requests",
+        "study-certificate",
+        "academic-leave",
+        "diploma-documents",
+        "personal-data",
+        "notifications",
+    ],
+    "gornyak-misis": [
+        "login",
+        "dorm-payment",
+        "cleaning-request",
+        "plumber-request",
+        "electrician-request",
+        "commandant-appointment",
+        "room-info",
+        "documents",
+    ],
+    "folio-misis": [
+        "login",
+        "book-search",
+        "digital-books",
+        "article-access",
+        "book-reservation",
+        "return-deadline",
+        "reader-profile",
+    ],
+    "pulse-misis": [
+        "event-list",
+        "event-registration",
+        "qr-ticket",
+        "event-reminders",
+        "attendance-check",
+        "certificates",
+        "event-feedback",
+    ],
+    "vector-misis": [
+        "internships",
+        "vacancies",
+        "practice-documents",
+        "company-events",
+        "resume-upload",
+        "application-status",
+        "career-consultation",
+    ],
+    "pay-misis": [
+        "tuition-payment",
+        "dorm-payment",
+        "invoice",
+        "payment-status",
+        "refund",
+        "receipt",
+    ],
+}
 
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s service=support-desk-api %(message)s",
+    format="%(asctime)s %(levelname)s service=misis-digital-student-support-api %(message)s",
 )
 
 
@@ -1052,58 +1360,233 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def load_tickets():
-    if not os.path.exists(DATA_FILE):
-        return [
-            {
-                "id": 1,
-                "title": "VPN access issue",
-                "description": "User cannot access internal resources through VPN.",
-                "priority": "high",
-                "status": "open",
-                "source": "seed",
-                "created_at": now_iso(),
-                "updated_at": now_iso(),
-            },
-            {
-                "id": 2,
-                "title": "Grafana access request",
-                "description": "New team member needs access to monitoring dashboards.",
-                "priority": "normal",
-                "status": "in_progress",
-                "source": "seed",
-                "created_at": now_iso(),
-                "updated_at": now_iso(),
-            },
-            {
-                "id": 3,
-                "title": "Backend health check",
-                "description": "Regular health check ticket for app service.",
-                "priority": "low",
-                "status": "resolved",
-                "source": "seed",
-                "created_at": now_iso(),
-                "updated_at": now_iso(),
-            },
-        ]
+def as_text(value, default=""):
+    if value is None:
+        return default
+    return str(value).strip()
 
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+
+def normalize_slug(value, default=""):
+    text = as_text(value, default).lower()
+    text = text.replace("_", "-").replace(" ", "-")
+    text = re.sub(r"[^a-z0-9-]", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-")
+    return text or default
+
+
+def normalize_status(value, default=""):
+    text = as_text(value, default).lower()
+    text = text.replace("-", "_").replace(" ", "_")
+    text = re.sub(r"[^a-z0-9_]", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text or default
+
+
+def clean_log_value(value):
+    if value is None or value == "":
+        return "-"
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("\n", "_")
+        .replace("\r", "_")
+        .replace("\t", "_")
+        .replace(" ", "_")
+    )
+
+
+def category_label(category):
+    return CATEGORY_LABELS.get(category, category)
+
+
+def resource_label(resource):
+    return RESOURCE_LABELS.get(resource, resource.replace("-", " ").title())
+
+
+def build_title(category, resource):
+    return f"{resource_label(resource)} issue on {category_label(category)}"
+
+
+def validate_category_resource(category_value, resource_value):
+    category = normalize_slug(category_value)
+    resource = normalize_slug(resource_value)
+
+    if not category:
+        return None, None, "missing_category"
+
+    if not resource:
+        return None, None, "missing_resource"
+
+    if category not in CATEGORY_TO_RESOURCES:
+        return None, None, f"invalid_category:{category}"
+
+    if resource not in CATEGORY_TO_RESOURCES[category]:
+        return None, None, f"invalid_resource_for_category:{category}:{resource}"
+
+    return category, resource, None
+
+
+def validate_ticket(ticket):
+    if not isinstance(ticket, dict):
+        raise ValueError("ticket_must_be_object")
+
+    category, resource, error = validate_category_resource(
+        ticket.get("category"),
+        ticket.get("resource"),
+    )
+    if error:
+        raise ValueError(error)
+
+    status = normalize_status(ticket.get("status"), "open")
+    if status not in STATUS_VALUES:
+        raise ValueError(f"invalid_status:{status}")
+
+    priority = normalize_slug(ticket.get("priority"), "normal")
+    if priority not in PRIORITY_VALUES:
+        raise ValueError(f"invalid_priority:{priority}")
+
+    normalized = dict(ticket)
+    normalized["category"] = category
+    normalized["category_label"] = category_label(category)
+    normalized["resource"] = resource
+    normalized["resource_label"] = resource_label(resource)
+    normalized["status"] = status
+    normalized["priority"] = priority
+    normalized["source"] = normalize_slug(ticket.get("source"), "unknown")
+    normalized["title"] = as_text(ticket.get("title")) or build_title(category, resource)
+    normalized["description"] = as_text(ticket.get("description"))
+    normalized["schema_version"] = 2
+
+    if not normalized.get("created_at"):
+        normalized["created_at"] = now_iso()
+
+    if not normalized.get("updated_at"):
+        normalized["updated_at"] = normalized["created_at"]
+
+    if status == "resolved":
+        if not normalized.get("resolved_at"):
+            normalized["resolved_at"] = normalized["updated_at"]
+    else:
+        normalized["resolved_at"] = None
+
+    return normalized
+
+
+def service_model():
+    return {
+        "product": PRODUCT_NAME,
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "categories": [
+            {
+                "value": category,
+                "label": category_label(category),
+                "resources": [
+                    {
+                        "value": resource,
+                        "label": resource_label(resource),
+                    }
+                    for resource in resources
+                ],
+            }
+            for category, resources in CATEGORY_TO_RESOURCES.items()
+        ],
+        "priorities": PRIORITY_VALUES,
+        "statuses": STATUS_VALUES,
+    }
 
 
 def save_tickets(tickets):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
+    temp_file = f"{DATA_FILE}.tmp"
+
+    with open(temp_file, "w", encoding="utf-8") as f:
         json.dump(tickets, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+    os.replace(temp_file, DATA_FILE)
+
+
+def load_tickets():
+    if not os.path.exists(DATA_FILE):
+        save_tickets([])
+        return []
+
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        tickets = json.load(f)
+
+    if not isinstance(tickets, list):
+        raise ValueError("tickets_storage_must_be_list")
+
+    normalized_tickets = []
+    changed = False
+
+    for index, ticket in enumerate(tickets, start=1):
+        normalized = validate_ticket(ticket)
+
+        try:
+            ticket_id = int(normalized.get("id", index))
+        except (TypeError, ValueError):
+            ticket_id = index
+
+        if normalized.get("id") != ticket_id:
+            normalized["id"] = ticket_id
+            changed = True
+
+        if normalized != ticket:
+            changed = True
+
+        normalized_tickets.append(normalized)
+
+    if changed:
+        save_tickets(normalized_tickets)
+
+    return normalized_tickets
 
 
 def next_ticket_id(tickets):
     if not tickets:
         return 1
-    return max(ticket["id"] for ticket in tickets) + 1
+    return max(int(ticket["id"]) for ticket in tickets) + 1
 
 
 def count_by_status(tickets, status):
     return sum(1 for ticket in tickets if ticket["status"] == status)
+
+
+def active_tickets(tickets):
+    return [ticket for ticket in tickets if ticket["status"] in ACTIVE_STATUSES]
+
+
+def make_list_payload(tickets, selected_tickets, selected_filter):
+    return {
+        "tickets": selected_tickets,
+        "count": len(selected_tickets),
+        "filter": selected_filter,
+        "total": len(tickets),
+        "active_count": len(active_tickets(tickets)),
+        "open_count": count_by_status(tickets, "open"),
+        "in_progress_count": count_by_status(tickets, "in_progress"),
+        "resolved_count": count_by_status(tickets, "resolved"),
+    }
+
+
+def normalize_path(path):
+    normalized = path.rstrip("/")
+    return normalized or "/"
+
+
+def strip_version_prefix(path):
+    if path == "/v1":
+        return "/"
+    if path.startswith("/v1/"):
+        return path[3:]
+    return path
+
+
+def api_version(path):
+    if path == "/v1" or path.startswith("/v1/"):
+        return "v1"
+    return "legacy"
 
 
 class SupportDeskHandler(BaseHTTPRequestHandler):
@@ -1113,28 +1596,34 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
+    def send_api_error(self, status_code, error, **fields):
+        payload = {"error": error}
+        payload.update(fields)
+        self.send_json(status_code, payload)
+
     def read_json_body(self):
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            raise ValueError("invalid_content_length")
+
         if length == 0:
             return {}
 
-        raw_body = self.rfile.read(length)
-        return json.loads(raw_body.decode("utf-8"))
+        if length > MAX_BODY_BYTES:
+            raise ValueError("request_body_too_large")
 
-    def clean_log_value(self, value):
-        if value is None or value == "":
-            return "-"
-        return (
-            str(value)
-            .replace("\\", "\\\\")
-            .replace("\n", "_")
-            .replace("\r", "_")
-            .replace("\t", "_")
-            .replace(" ", "_")
-        )
+        raw_body = self.rfile.read(length)
+        data = json.loads(raw_body.decode("utf-8"))
+
+        if not isinstance(data, dict):
+            raise ValueError("json_body_must_be_object")
+
+        return data
 
     def log_event(self, level, event, status_code, **fields):
         client_ip = self.client_address[0]
@@ -1144,71 +1633,138 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
         parts = [
             f"event={event}",
             f"method={self.command}",
-            f"path={self.path}",
+            f"path={clean_log_value(self.path)}",
             f"status={status_code}",
-            f"client_ip={self.clean_log_value(client_ip)}",
-            f"x_forwarded_for={self.clean_log_value(x_forwarded_for)}",
-            f"x_forwarded_proto={self.clean_log_value(x_forwarded_proto)}",
+            f"client_ip={clean_log_value(client_ip)}",
+            f"x_forwarded_for={clean_log_value(x_forwarded_for)}",
+            f"x_forwarded_proto={clean_log_value(x_forwarded_proto)}",
         ]
 
         for key, value in fields.items():
-            parts.append(f"{key}={self.clean_log_value(value)}")
+            parts.append(f"{key}={clean_log_value(value)}")
 
         logging.log(level, " ".join(parts))
 
+    def handle_internal_error(self, exc):
+        self.send_api_error(500, "internal_server_error")
+        self.log_event(logging.ERROR, "internal_error", 500, error=type(exc).__name__)
+
     def do_GET(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        raw_path = normalize_path(parsed.path)
+        path = strip_version_prefix(raw_path)
+        version = api_version(raw_path)
+        query = parse_qs(parsed.query)
 
         try:
             if path == "/health":
                 payload = {
                     "status": "ok",
+                    "product": PRODUCT_NAME,
                     "service": SERVICE_NAME,
                     "version": SERVICE_VERSION,
                     "environment": ENVIRONMENT,
+                    "api_version": version,
+                    "supported_api_versions": ["legacy", "v1"],
                     "time": now_iso(),
                 }
                 self.send_json(200, payload)
-                self.log_event(logging.INFO, "health_check", 200)
+                self.log_event(logging.INFO, "health_check", 200, api_version=version)
+                return
 
-            elif path == "/tickets":
+            if path in ["/support-model", "/model"]:
+                self.send_json(200, service_model())
+                self.log_event(logging.INFO, "support_model_requested", 200, api_version=version)
+                return
+
+            if path == "/tickets":
                 tickets = load_tickets()
-                payload = {
-                    "tickets": tickets,
-                    "count": len(tickets),
-                }
+                status_filter = normalize_status(query.get("status", ["active"])[0], "active")
+
+                if status_filter == "active":
+                    selected_tickets = active_tickets(tickets)
+                    selected_filter = "active"
+                elif status_filter == "all":
+                    selected_tickets = tickets
+                    selected_filter = "all"
+                elif status_filter in STATUS_VALUES:
+                    selected_tickets = [
+                        ticket for ticket in tickets
+                        if ticket["status"] == status_filter
+                    ]
+                    selected_filter = status_filter
+                else:
+                    self.send_api_error(
+                        400,
+                        "invalid_status_filter",
+                        allowed=["active", "all"] + STATUS_VALUES,
+                    )
+                    self.log_event(
+                        logging.WARNING,
+                        "ticket_validation_failed",
+                        400,
+                        reason="invalid_status_filter",
+                    )
+                    return
+
+                payload = make_list_payload(tickets, selected_tickets, selected_filter)
                 self.send_json(200, payload)
                 self.log_event(
                     logging.INFO,
                     "ticket_list_requested",
                     200,
+                    api_version=version,
+                    filter=selected_filter,
+                    count=len(selected_tickets),
+                )
+                return
+
+            if path == "/tickets/all":
+                tickets = load_tickets()
+                payload = make_list_payload(tickets, tickets, "all")
+                self.send_json(200, payload)
+                self.log_event(
+                    logging.INFO,
+                    "ticket_list_requested",
+                    200,
+                    api_version=version,
+                    filter="all",
                     count=len(tickets),
                 )
+                return
 
-            elif re.fullmatch(r"/tickets/\d+", path):
-                ticket_id = int(path.split("/")[-1])
+            detail_match = re.fullmatch(r"/tickets/(\d+)", path)
+            if detail_match:
+                ticket_id = int(detail_match.group(1))
                 tickets = load_tickets()
-                ticket = next((item for item in tickets if item["id"] == ticket_id), None)
+                ticket = next(
+                    (item for item in tickets if int(item["id"]) == ticket_id),
+                    None,
+                )
 
                 if ticket is None:
-                    self.send_json(404, {"error": "ticket_not_found"})
+                    self.send_api_error(404, "ticket_not_found")
                     self.log_event(
                         logging.WARNING,
                         "ticket_not_found",
                         404,
                         ticket_id=ticket_id,
                     )
-                else:
-                    self.send_json(200, ticket)
-                    self.log_event(
-                        logging.INFO,
-                        "ticket_detail_requested",
-                        200,
-                        ticket_id=ticket_id,
-                    )
+                    return
 
-            elif path == "/metrics":
+                self.send_json(200, ticket)
+                self.log_event(
+                    logging.INFO,
+                    "ticket_detail_requested",
+                    200,
+                    api_version=version,
+                    ticket_id=ticket_id,
+                    category=ticket.get("category"),
+                    resource=ticket.get("resource"),
+                )
+                return
+
+            if path == "/metrics":
                 tickets = load_tickets()
                 lines = [
                     "# HELP supportdesk_tickets_total Total number of support desk tickets",
@@ -1223,6 +1779,9 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                     "# HELP supportdesk_tickets_resolved Number of resolved support desk tickets",
                     "# TYPE supportdesk_tickets_resolved gauge",
                     f"supportdesk_tickets_resolved {count_by_status(tickets, 'resolved')}",
+                    "# HELP supportdesk_tickets_active Number of active support desk tickets",
+                    "# TYPE supportdesk_tickets_active gauge",
+                    f"supportdesk_tickets_active {len(active_tickets(tickets))}",
                     "",
                 ]
                 body = "\n".join(lines).encode("utf-8")
@@ -1230,103 +1789,148 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
 
-                self.log_event(logging.INFO, "metrics_requested", 200)
+                self.log_event(logging.INFO, "metrics_requested", 200, api_version=version)
+                return
 
-            else:
-                self.send_json(404, {"error": "not_found"})
-                self.log_event(logging.WARNING, "endpoint_not_found", 404)
+            self.send_api_error(404, "not_found")
+            self.log_event(logging.WARNING, "endpoint_not_found", 404, api_version=version)
 
+        except json.JSONDecodeError:
+            self.send_api_error(500, "tickets_storage_invalid_json")
+            self.log_event(logging.ERROR, "internal_error", 500, error="tickets_storage_invalid_json")
+        except ValueError as exc:
+            self.send_api_error(500, "tickets_storage_invalid", detail=str(exc))
+            self.log_event(logging.ERROR, "internal_error", 500, error=str(exc))
         except Exception as exc:
-            self.send_json(500, {"error": "internal_server_error"})
-            self.log_event(logging.ERROR, "internal_error", 500, error=type(exc).__name__)
+            self.handle_internal_error(exc)
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        raw_path = normalize_path(parsed.path)
+        path = strip_version_prefix(raw_path)
+        version = api_version(raw_path)
 
         try:
-            if path == "/tickets":
+            if path != "/tickets":
+                self.send_api_error(404, "not_found")
+                self.log_event(logging.WARNING, "endpoint_not_found", 404, api_version=version)
+                return
+
+            try:
                 data = self.read_json_body()
+            except json.JSONDecodeError:
+                self.send_api_error(400, "invalid_json")
+                self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason="invalid_json")
+                return
+            except ValueError as exc:
+                self.send_api_error(400, str(exc))
+                self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason=str(exc))
+                return
 
-                title = str(data.get("title", "")).strip()
-                description = str(data.get("description", "")).strip()
-                priority = str(data.get("priority", "normal")).strip().lower()
-                source = str(data.get("source", "web")).strip().lower()
+            category, resource, error = validate_category_resource(
+                data.get("category"),
+                data.get("resource"),
+            )
+            if error:
+                self.send_api_error(400, error)
+                self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason=error)
+                return
 
-                if not title:
-                    self.send_json(400, {"error": "missing_title"})
-                    self.log_event(
-                        logging.WARNING,
-                        "ticket_validation_failed",
-                        400,
-                        reason="missing_title",
-                        source=source,
-                    )
-                    return
+            priority = normalize_slug(data.get("priority", "normal"), "normal")
+            if priority not in PRIORITY_VALUES:
+                self.send_api_error(400, "invalid_priority", allowed=PRIORITY_VALUES)
+                self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason="invalid_priority")
+                return
 
-                if priority not in ["low", "normal", "high", "critical"]:
-                    priority = "normal"
+            title = as_text(data.get("title")) or build_title(category, resource)
+            description = as_text(data.get("description"))
+            source = normalize_slug(data.get("source", "web"), "web")
+            created_at = now_iso()
+            tickets = load_tickets()
 
-                tickets = load_tickets()
-                ticket = {
-                    "id": next_ticket_id(tickets),
-                    "title": title,
-                    "description": description,
-                    "priority": priority,
-                    "status": "open",
-                    "source": source,
-                    "created_at": now_iso(),
-                    "updated_at": now_iso(),
-                }
+            ticket = {
+                "id": next_ticket_id(tickets),
+                "schema_version": 2,
+                "title": title,
+                "category": category,
+                "category_label": category_label(category),
+                "resource": resource,
+                "resource_label": resource_label(resource),
+                "description": description,
+                "priority": priority,
+                "status": "open",
+                "source": source,
+                "created_at": created_at,
+                "updated_at": created_at,
+                "resolved_at": None,
+            }
 
-                tickets.append(ticket)
-                save_tickets(tickets)
+            tickets.append(ticket)
+            save_tickets(tickets)
 
-                self.send_json(201, ticket)
-                self.log_event(
-                    logging.INFO,
-                    "ticket_created",
-                    201,
-                    ticket_id=ticket["id"],
-                    priority=priority,
-                    source=source,
-                )
-
-            else:
-                self.send_json(404, {"error": "not_found"})
-                self.log_event(logging.WARNING, "endpoint_not_found", 404)
-
-        except json.JSONDecodeError:
-            self.send_json(400, {"error": "invalid_json"})
-            self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason="invalid_json")
+            self.send_json(201, ticket)
+            self.log_event(
+                logging.INFO,
+                "ticket_created",
+                201,
+                api_version=version,
+                ticket_id=ticket["id"],
+                category=category,
+                resource=resource,
+                priority=priority,
+                source=source,
+            )
 
         except Exception as exc:
-            self.send_json(500, {"error": "internal_server_error"})
-            self.log_event(logging.ERROR, "internal_error", 500, error=type(exc).__name__)
+            self.handle_internal_error(exc)
 
     def do_PATCH(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        raw_path = normalize_path(parsed.path)
+        path = strip_version_prefix(raw_path)
+        version = api_version(raw_path)
 
         try:
             match = re.fullmatch(r"/tickets/(\d+)/status", path)
-
             if not match:
-                self.send_json(404, {"error": "not_found"})
-                self.log_event(logging.WARNING, "endpoint_not_found", 404)
+                self.send_api_error(404, "not_found")
+                self.log_event(logging.WARNING, "endpoint_not_found", 404, api_version=version)
                 return
 
             ticket_id = int(match.group(1))
-            data = self.read_json_body()
 
-            new_status = str(data.get("status", "")).strip().lower()
-            source = str(data.get("source", "web")).strip().lower()
+            try:
+                data = self.read_json_body()
+            except json.JSONDecodeError:
+                self.send_api_error(400, "invalid_json")
+                self.log_event(
+                    logging.WARNING,
+                    "ticket_validation_failed",
+                    400,
+                    reason="invalid_json",
+                    ticket_id=ticket_id,
+                )
+                return
+            except ValueError as exc:
+                self.send_api_error(400, str(exc))
+                self.log_event(
+                    logging.WARNING,
+                    "ticket_validation_failed",
+                    400,
+                    reason=str(exc),
+                    ticket_id=ticket_id,
+                )
+                return
 
-            if new_status not in ["open", "in_progress", "resolved"]:
-                self.send_json(400, {"error": "invalid_status"})
+            new_status = normalize_status(data.get("status"), "")
+            source = normalize_slug(data.get("source", "web"), "web")
+
+            if new_status not in STATUS_VALUES:
+                self.send_api_error(400, "invalid_status", allowed=STATUS_VALUES)
                 self.log_event(
                     logging.WARNING,
                     "ticket_validation_failed",
@@ -1338,10 +1942,13 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                 return
 
             tickets = load_tickets()
-            ticket = next((item for item in tickets if item["id"] == ticket_id), None)
+            ticket = next(
+                (item for item in tickets if int(item["id"]) == ticket_id),
+                None,
+            )
 
             if ticket is None:
-                self.send_json(404, {"error": "ticket_not_found"})
+                self.send_api_error(404, "ticket_not_found")
                 self.log_event(
                     logging.WARNING,
                     "ticket_not_found",
@@ -1359,15 +1966,22 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                     logging.INFO,
                     "ticket_status_unchanged",
                     200,
+                    api_version=version,
                     ticket_id=ticket_id,
                     old_status=old_status,
                     new_status=new_status,
+                    category=ticket.get("category"),
+                    resource=ticket.get("resource"),
                     source=source,
                 )
                 return
 
+            changed_at = now_iso()
             ticket["status"] = new_status
-            ticket["updated_at"] = now_iso()
+            ticket["updated_at"] = changed_at
+            ticket["resolved_at"] = changed_at if new_status == "resolved" else None
+            ticket["schema_version"] = 2
+
             save_tickets(tickets)
 
             self.send_json(200, ticket)
@@ -1375,19 +1989,18 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                 logging.INFO,
                 "ticket_status_changed",
                 200,
+                api_version=version,
                 ticket_id=ticket_id,
                 old_status=old_status,
                 new_status=new_status,
+                category=ticket.get("category"),
+                resource=ticket.get("resource"),
                 source=source,
+                resolved_at=ticket.get("resolved_at"),
             )
 
-        except json.JSONDecodeError:
-            self.send_json(400, {"error": "invalid_json"})
-            self.log_event(logging.WARNING, "ticket_validation_failed", 400, reason="invalid_json")
-
         except Exception as exc:
-            self.send_json(500, {"error": "internal_server_error"})
-            self.log_event(logging.ERROR, "internal_error", 500, error=type(exc).__name__)
+            self.handle_internal_error(exc)
 
     def log_message(self, format, *args):
         return
@@ -1396,6 +2009,7 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = HTTPServer((HOST, PORT), SupportDeskHandler)
     server.serve_forever()
+
 ```
 
 ## Windows portproxy для будущего Telegram bot
