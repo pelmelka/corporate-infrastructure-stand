@@ -43,21 +43,16 @@
 
 ## Завершено: Web/App integration
 
-- [x] Выбрана продуктовая реализация: Mini Support Desk.
+- [x] Выбрана первичная продуктовая реализация: Mini Support Desk.
 - [x] На `app` создан backup `/opt/app/app.py.bak-before-supportdesk`.
-- [x] Backend заменен на `support-desk-api`.
+- [x] Backend заменен на support-desk API.
 - [x] `app.service` перезапущен и active/running.
 - [x] Проверены `/health`, `/tickets`, `POST /tickets`, `PATCH /tickets/<id>/status`, `/metrics`.
 - [x] Создан `/opt/app/tickets.json`.
-- [x] App пишет product logs `service=support-desk-api event=...`.
+- [x] App пишет product logs `event=...`.
 - [x] На `web` настроен Nginx reverse proxy `/api/* -> http://192.168.85.133:8080/`.
-- [x] На `web` заменен frontend на Mini Support Desk.
+- [x] На `web` заменен frontend.
 - [x] Browser -> web -> app flow подтвержден.
-- [x] Через браузер создана тестовая заявка.
-- [x] Через браузер изменен статус заявки.
-- [x] `nginx access.log` показывает `GET/POST/PATCH /api/*`.
-- [x] `app.log` показывает product events.
-- [x] Grafana Explore/Loki видит product logs.
 
 ## Завершено: Полировка logging
 
@@ -71,7 +66,6 @@
 - [x] Подтверждены `ticket_validation_failed`, `ticket_not_found`, `endpoint_not_found`.
 - [x] App logs panel в Grafana обновлена под `event=...` формат.
 - [x] Promtail label на `app` изменен с `service=python-backend` на `service=support-desk-api`.
-- [x] Новые logs доступны по LogQL `{host="app", job="app", service="support-desk-api"}`.
 
 ## Завершено: Полировка monitoring
 
@@ -102,30 +96,64 @@
 - [x] Добавлен `ansible.cfg`; подтверждено, что Ansible использует `/home/pelmel/control-node/ansible.cfg`.
 - [x] Создан `playbooks/ping_all.yml`.
 - [x] Создан и проверен `playbooks/check_services.yml`.
-- [x] Создан и проверен `playbooks/restart_app.yml` с `become: true`, `vars_prompt`, restart `app.service` и healthcheck.
-- [x] Создан и проверен `playbooks/deploy_prometheus_rules.yml` с `promtool` validation, handler restart Prometheus и readiness check.
+- [x] Создан и проверен `playbooks/restart_app.yml`.
+- [x] Создан и проверен `playbooks/deploy_prometheus_rules.yml`.
 - [x] Локальный source-файл Prometheus rules сохранен в `files/prometheus/supportdesk.rules.yml`.
 - [x] Инициализирован Git repo в `~/control-node`.
 - [x] Настроены локальные Git user.name/user.email.
 - [x] Сделан первый commit `initial Ansible control node setup`.
 - [x] Добавлены `.gitkeep` для пустых директорий `roles/`, `templates/`, `docs/` и сделан commit `Add Ansible project directory placeholders`.
 
-## Текущий следующий этап: Product model v2
+## Завершено: Product model v2 — MISIS_Digital Student Support
 
-- [ ] Заменить/дополнить `Title` на `Resource` dropdown.
-- [ ] Добавить `Category` dropdown.
-- [ ] Добавить поля `resource`, `category`, `resolved_at` в ticket model.
-- [ ] Сделать active/resolved разделение заявок.
-- [ ] Сделать так, чтобы resolved-заявки исчезали из active list, но сохранялись в истории.
-- [ ] Подготовить переход к `/api/v1/*`.
+- [x] Концепция продукта переосмыслена: `MISIS_Digital Student Support`.
+- [x] `category` теперь означает цифровой сервис университета.
+- [x] `resource` теперь означает раздел/функцию внутри выбранного сервиса.
+- [x] Утверждены категории: `newlms-misis`, `lk-misis`, `gornyak-misis`, `folio-misis`, `pulse-misis`, `vector-misis`, `pay-misis`.
+- [x] В UI показываются labels с `.ru`: `newlms.misis.ru`, `lk.misis.ru`, `gornyak.misis.ru`, `folio.misis.ru`, `pulse.misis.ru`, `vector.misis.ru`, `pay.misis.ru`.
+- [x] В API/logs/metrics используются короткие slug-и без `-ru` для читаемости.
+- [x] Старые v1-заявки сохранены в backup `tickets.json.bak-before-product-model-v2-*`.
+- [x] Рабочий `/opt/app/tickets.json` очищен под новую модель.
+- [x] Категория `legacy` не используется.
+- [x] Backend заменен на `misis-digital-student-support-api`.
+- [x] Добавлены поля `schema_version`, `category`, `category_label`, `resource`, `resource_label`, `resolved_at`.
+- [x] `category/resource` обязательны для новых заявок.
+- [x] Backend валидирует, что `resource` разрешен для выбранной `category`.
+- [x] Неверная пара `category/resource` возвращает validation error.
+- [x] Исправлена нормализация статуса `in_progress` через отдельную `normalize_status()`.
+- [x] Реализованы `/v1/health`, `/v1/support-model`, `/v1/tickets`, `/v1/tickets/all`, `/v1/tickets/<id>`, `/v1/tickets/<id>/status`.
+- [x] Legacy endpoints без `/v1` сохранены для совместимости.
+- [x] `/tickets` и `/v1/tickets` показывают active tickets: `open + in_progress`.
+- [x] `/tickets?status=resolved` и `/v1/tickets?status=resolved` показывают resolved history.
+- [x] `/tickets/all` и `/v1/tickets/all` показывают все заявки.
+- [x] При `resolved` заполняется `resolved_at`.
+- [x] При reopen в `open`/`in_progress` `resolved_at` сбрасывается в `null`.
+- [x] Frontend заменен на форму `Digital service -> Service section`.
+- [x] Resource dropdown динамически меняется по выбранной category.
+- [x] В UI работают вкладки `Active`, `Resolved`, `All`.
+- [x] UI flow подтвержден: create, open, in_progress, resolved, reopen.
+- [x] App logs пишут `service=misis-digital-student-support-api`.
+- [x] Promtail static label обновлен на `service=misis-digital-student-support-api`.
+- [x] Promtail pipeline добавляет dynamic Loki label `category`.
+- [x] В Grafana Explore подтверждены запросы по `category="gornyak-misis"` и `category="lk-misis"`.
+- [x] Grafana App logs panel обновлен под новый service label и новый line_format.
+- [x] `ticket_list_requested` сознательно оставлен в App logs panel как полезный признак активности UI/API.
+- [x] Старые Prometheus метрики не сломаны.
+- [x] Добавлена метрика `supportdesk_tickets_active`.
 
-## Далее: Product observability v2
+## Текущий следующий этап: Product observability v2
 
-- [ ] Добавить metrics by resource/category/priority/source.
-- [ ] Добавить panels по resource/category.
-- [ ] Добавить `SupportDeskTooManyTicketsForResource`.
-- [ ] Добавить `SupportDeskCategoryIncident`.
-- [ ] Добавить `SupportDeskCriticalTicketsOpen`.
+- [ ] Добавить metrics by `category`.
+- [ ] Добавить metrics by `category/resource`.
+- [ ] Добавить metrics by `priority`.
+- [ ] Добавить metrics by `source`.
+- [ ] Добавить counters `supportdesk_tickets_created_total{category,resource,priority,source}`.
+- [ ] Добавить counters `supportdesk_tickets_resolved_total{category,resource}`.
+- [ ] Добавить Grafana panels по категориям: `newlms-misis`, `lk-misis`, `gornyak-misis`, `pay-misis` и т.д.
+- [ ] Добавить panel по top resources.
+- [ ] Добавить alert `SupportDeskTooManyTicketsForCategory`.
+- [ ] Добавить alert `SupportDeskTooManyTicketsForResource`.
+- [ ] Добавить alert `SupportDeskCriticalTicketsOpen`.
 
 ## Далее: HTTP/request observability
 
@@ -137,7 +165,7 @@
 
 ## Далее: Dockerization
 
-- [ ] Создать Dockerfile для `support-desk-api`.
+- [ ] Создать Dockerfile для `misis-digital-student-support-api`.
 - [ ] Создать `docker-compose.yml` на `app`.
 - [ ] Оставить внешний порт `8080`.
 - [ ] Сохранить app logs через volume `/var/log/app/app.log`.
@@ -160,7 +188,7 @@
 - [ ] Реализовать `support-bot` через long polling.
 - [ ] Использовать Windows portproxy workaround для Telegram API.
 - [ ] Хранить bot token в env-файле.
-- [ ] Создавать/читать/закрывать tickets через тот же app API.
+- [ ] Создавать/читать/закрывать tickets через тот же app API v1.
 - [ ] Писать `source=telegram`.
 - [ ] Отправлять bot logs в Loki.
 

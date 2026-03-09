@@ -1,10 +1,32 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "Logging polish, monitoring polish and Admin/Ansible foundation completed. Mini Support Desk works through web -> app; product logs are visible in Loki/Grafana; app product metrics are scraped by Prometheus; Grafana dashboard and alert rules are implemented/tested; admin is now a working Ansible control node with SSH keys to managed nodes, full inventory, ansible.cfg, operational playbooks and Git history.",
-  "last_completed_stage": "Admin/Ansible foundation: SSH key-based access admin -> web/app/log/monitor, full inventory, ansible all/managed ping, control-node structure, ansible.cfg, playbooks ping_all/check_services/restart_app/deploy_prometheus_rules, Git repo with initial commits",
-  "current_next_stage": "Product model v2: add resource/category fields, active/resolved ticket separation, resolved_at, history-oriented API behavior, prepare /api/v1/* transition",
-  "files": [
+  "status": "Product model v2 completed. The product is now MISIS_Digital Student Support: a student-facing support portal for university digital services. Browser -> web/Nginx -> app/v1 API works; tickets use category/resource model; active/resolved/history flow works; app logs contain category/resource; Promtail adds category as a Loki label; Grafana dashboard app logs and product metrics are updated; admin remains an Ansible control node.",
+  "last_completed_stage": "Product model v2: MISIS_Digital Student Support, category/resource model, API v1, active/resolved tickets, frontend category->resource dropdown, Promtail category label, Grafana App logs update",
+  "current_next_stage": "Product observability v2: metrics and alerts by category/resource/priority/source",
+  "servers": {
+    "admin": "192.168.85.129",
+    "web": "192.168.85.131",
+    "app": "192.168.85.133",
+    "log": "192.168.85.135",
+    "monitor": "192.168.85.137"
+  },
+  "product": {
+    "name": "MISIS_Digital Student Support",
+    "backend_service": "misis-digital-student-support-api",
+    "categories": [
+      "newlms-misis",
+      "lk-misis",
+      "gornyak-misis",
+      "folio-misis",
+      "pulse-misis",
+      "vector-misis",
+      "pay-misis"
+    ],
+    "storage": "/opt/app/tickets.json",
+    "api_prefix": "/v1"
+  },
+  "sources": [
     "00_project_overview_and_roadmap.md",
     "01_server_admin_state.md",
     "02_server_web_state.md",
@@ -18,6 +40,5 @@
     "10_interaction_guide.md",
     "11_server_monitor_state.md",
     "12_future_improvements_backlog.md"
-  ],
-  "progress_estimate": "expanded roadmap formal progress 11/21 stages completed (~52%); core infrastructure lab stages 1-10 completed; Admin/Ansible foundation completed; engineering readiness for expanded production-like scope 58-63%; current core demo readiness 85-88%"
+  ]
 }

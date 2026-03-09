@@ -6,8 +6,8 @@
 
 Роль:
 
-- запускать Python backend `support-desk-api`;
-- обрабатывать API Mini Support Desk;
+- запускать Python backend `misis-digital-student-support-api`;
+- обрабатывать API продукта `MISIS_Digital Student Support`;
 - хранить заявки в lab storage `/opt/app/tickets.json`;
 - писать product logs в `/var/log/app/app.log`;
 - отдавать product metrics на `/metrics`;
@@ -40,34 +40,96 @@
 /opt/app/app.py.bak-before-supportdesk
 /opt/app/app.py.bak-before-logging
 /opt/app/app.py.bak-before-logging-polish
+/opt/app/app.py.bak-before-product-model-v2
 /opt/app/tickets.json
+/opt/app/tickets.json.bak-before-product-model-v2-...
 ```
+
+Старые заявки из Mini Support Desk v1 сохранены в backup `tickets.json.bak-before-product-model-v2-*`. Рабочий `/opt/app/tickets.json` очищен и используется только под новую модель v2. Категория `legacy` сознательно не используется.
 
 Полный текущий код `app.py` фиксируется в `06_config_files_current.md`, а не дублируется здесь.
 
 ## Python-приложение
 
-Текущая роль приложения: backend API продукта Mini Support Desk.
+Текущая роль приложения: backend API продукта `MISIS_Digital Student Support`.
 
 Приложение:
 
 - слушает `0.0.0.0:8080`;
 - работает через `app.service`;
-- возвращает API-ответы преимущественно в JSON;
+- возвращает API-ответы в JSON;
 - хранит заявки в `/opt/app/tickets.json`;
 - пишет product logs в `/var/log/app/app.log`;
-- отдает product metrics на `/metrics` в Prometheus text format.
+- отдает product metrics на `/metrics` в Prometheus text format;
+- поддерживает legacy endpoints и новые `/v1/*` endpoints.
+
+Product model v2:
+
+```text
+category = цифровой сервис университета
+resource = раздел/функция внутри выбранного сервиса
+```
+
+Текущие category values:
+
+```text
+newlms-misis
+lk-misis
+gornyak-misis
+folio-misis
+pulse-misis
+vector-misis
+pay-misis
+```
+
+UI labels:
+
+```text
+newlms.misis.ru
+lk.misis.ru
+gornyak.misis.ru
+folio.misis.ru
+pulse.misis.ru
+vector.misis.ru
+pay.misis.ru
+```
+
+`category` и `resource` обязательны для новых заявок. Backend проверяет, что выбранный `resource` разрешен именно для выбранной `category`. Неправильная пара возвращает ошибку вида:
+
+```text
+invalid_resource_for_category:newlms-misis:plumber-request
+```
 
 Endpoints:
 
 ```text
 GET    /health
+GET    /v1/health
+GET    /v1/support-model
 GET    /tickets
+GET    /v1/tickets
+GET    /tickets/all
+GET    /v1/tickets/all
+GET    /tickets?status=resolved
+GET    /v1/tickets?status=resolved
 POST   /tickets
+POST   /v1/tickets
 GET    /tickets/<id>
+GET    /v1/tickets/<id>
 PATCH  /tickets/<id>/status
+PATCH  /v1/tickets/<id>/status
 GET    /metrics
 ```
+
+Active/resolved logic:
+
+```text
+/tickets                    -> active tickets: open + in_progress
+/tickets?status=resolved    -> resolved history
+/tickets/all                -> all tickets
+```
+
+При переводе заявки в `resolved` заполняется `resolved_at`. При reopen обратно в `open`/`in_progress` поле `resolved_at` сбрасывается в `null`.
 
 ## Data storage
 
@@ -77,7 +139,26 @@ GET    /metrics
 /opt/app/tickets.json
 ```
 
-Это простое файловое хранилище для учебного этапа. Замена на PostgreSQL вынесена в roadmap/future improvements.
+Текущая schema для заявки:
+
+```text
+id
+schema_version
+title
+category
+category_label
+resource
+resource_label
+description
+priority
+status
+source
+created_at
+updated_at
+resolved_at
+```
+
+Это простое файловое хранилище для учебного этапа. Запись выполняется через временный файл и `os.replace()`, чтобы снизить риск повреждения файла при перезаписи. Замена на PostgreSQL вынесена в roadmap/future improvements.
 
 ## Product logs
 
@@ -92,8 +173,7 @@ GET    /metrics
 Текущие поля product logs:
 
 ```text
-service=support-desk-api
-level через стандартный logging format
+service=misis-digital-student-support-api
 event
 method
 path
@@ -101,7 +181,16 @@ status
 client_ip
 x_forwarded_for
 x_forwarded_proto
-ticket_id / priority / source / old_status / new_status / reason / count при необходимости
+api_version
+ticket_id
+category
+resource
+priority
+source
+old_status
+new_status
+resolved_at
+reason / count при необходимости
 ```
 
 Логика IP-полей:
@@ -112,23 +201,21 @@ x_forwarded_for  = исходный клиент до Nginx; обычно Window
 x_forwarded_proto = схема исходного запроса; сейчас http
 ```
 
-`x_real_ip` сознательно не логируется, потому что в текущей single-proxy схеме он дублирует `x_forwarded_for`. Nginx может продолжать передавать `X-Real-IP`, но app logs используют только `x_forwarded_for` как более полезное proxy metadata.
-
 Примеры product logs:
 
 ```text
-service=support-desk-api event=ticket_created method=POST path=/tickets status=201 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=8 priority=high source=web
-service=support-desk-api event=ticket_status_changed method=PATCH path=/tickets/8/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=8 old_status=open new_status=in_progress source=web
-service=support-desk-api event=ticket_status_unchanged method=PATCH path=/tickets/8/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=8 old_status=in_progress new_status=in_progress source=web
-service=support-desk-api event=ticket_validation_failed method=POST path=/tickets status=400 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http reason=missing_title source=web
-service=support-desk-api event=ticket_not_found method=GET path=/tickets/999999 status=404 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http ticket_id=999999
-service=support-desk-api event=endpoint_not_found method=GET path=/bad-endpoint status=404 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http
+service=misis-digital-student-support-api event=ticket_created method=POST path=/v1/tickets status=201 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 ticket_id=4 category=gornyak-misis resource=plumber-request priority=normal source=web
+service=misis-digital-student-support-api event=ticket_status_changed method=PATCH path=/v1/tickets/2/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 ticket_id=2 old_status=open new_status=in_progress category=pay-misis resource=dorm-payment source=web resolved_at=-
+service=misis-digital-student-support-api event=ticket_status_unchanged method=PATCH path=/v1/tickets/2/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 ticket_id=2 old_status=in_progress new_status=in_progress category=pay-misis resource=dorm-payment source=web
+service=misis-digital-student-support-api event=ticket_list_requested method=GET path=/v1/tickets status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 filter=active count=4
+service=misis-digital-student-support-api event=metrics_requested method=GET path=/metrics status=200 client_ip=192.168.85.137 x_forwarded_for=- x_forwarded_proto=- api_version=legacy
 ```
 
 Подтвержденные события:
 
 ```text
 event=health_check
+event=support_model_requested
 event=ticket_list_requested
 event=ticket_detail_requested
 event=ticket_created
@@ -141,7 +228,7 @@ event=metrics_requested
 event=internal_error
 ```
 
-Примечание: после подключения Prometheus scrape для app `/metrics` в logs регулярно появляются `event=metrics_requested` от `monitor` (`client_ip=192.168.85.137`). Это ожидаемо и пока оставлено как есть.
+Примечание: `ticket_list_requested` сознательно оставлен в dashboard/logs, потому что он показывает активность UI/API и подтверждает пользовательский путь `Browser -> web -> app`.
 
 ## Product metrics
 
@@ -158,6 +245,7 @@ supportdesk_tickets_total
 supportdesk_tickets_open
 supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
+supportdesk_tickets_active
 ```
 
 Prometheus на `monitor` собирает эти метрики отдельным scrape job:
@@ -170,7 +258,7 @@ service="support-desk-api"
 env="lab"
 ```
 
-Сейчас `/metrics` реализован вручную в `app.py`. Переход на Prometheus client library и расширенные request/error/latency metrics вынесен в roadmap/future improvements.
+Примечание: Prometheus job/metric names пока сохранены как `supportdesk-*`, чтобы не ломать существующие dashboard panels и alert rules. Переименование или добавление новых category/resource metrics запланировано на этап `Product observability v2`.
 
 ## systemd unit приложения
 
@@ -193,18 +281,20 @@ Restart=always
 
 ```bash
 systemctl status app.service --no-pager
-curl http://localhost:8080/health
-curl http://localhost:8080/tickets
-curl http://localhost:8080/metrics
+curl -s http://localhost:8080/v1/health | python3 -m json.tool
+curl -s http://localhost:8080/v1/support-model | python3 -m json.tool
+curl -s http://localhost:8080/v1/tickets | python3 -m json.tool
+curl -s http://localhost:8080/metrics
 ```
 
 Подтверждено:
 
 - `app.service active (running)`;
-- `/health` возвращает `support-desk-api` JSON;
-- `/tickets` возвращает список заявок;
+- `/v1/health` возвращает `MISIS_Digital Student Support` JSON;
+- `/v1/support-model` возвращает список цифровых сервисов и ресурсов;
+- `/v1/tickets` возвращает active tickets;
 - `/metrics` возвращает product metrics;
-- `/opt/app/tickets.json` существует и хранит заявки;
+- неверная пара `category/resource` возвращает validation error;
 - при остановке `app.service` alert `SupportDeskApiDown` переходит в `FIRING`.
 
 ## Promtail
@@ -221,16 +311,37 @@ Promtail читает:
 http://192.168.85.135:3100/loki/api/v1/push
 ```
 
-Текущие Promtail labels:
+Текущие static Promtail labels:
 
 ```text
 host=app
 job=app
-service=support-desk-api
+service=misis-digital-student-support-api
 env=lab
 ```
 
-Старые logs в Loki могут оставаться с label `service=python-backend`; новые logs после logging polish идут с `service=support-desk-api`.
+Текущий dynamic Loki label:
+
+```text
+category=<category из app log line>
+```
+
+`category` извлекается pipeline stage из log line вида `category=pay-misis`. Подтверждено, что Grafana Explore находит streams:
+
+```logql
+{host="app", job="app", category="gornyak-misis"}
+{host="app", job="app", category="lk-misis"}
+{host="app", job="app", service="misis-digital-student-support-api", category="pay-misis"}
+```
+
+`resource` пока не вынесен в Loki label и фильтруется как поле строки:
+
+```logql
+{host="app", job="app", service="misis-digital-student-support-api", category="pay-misis"}
+|= "resource=dorm-payment"
+```
+
+Старые logs в Loki остаются в stream `service="support-desk-api"`; новые logs после обновления Promtail идут в stream `service="misis-digital-student-support-api"`.
 
 ## node_exporter
 
@@ -240,11 +351,14 @@ env=lab
 
 ## Текущий статус
 
-`app` считается готовым backend node для Mini Support Desk:
+`app` считается готовым backend node для `MISIS_Digital Student Support`:
 
-- `support-desk-api` работает;
-- tickets create/list/status flow подтвержден;
+- API v1 работает;
+- category/resource validation подтверждена;
+- active/resolved разделение подтверждено;
+- `resolved_at` работает;
+- UI create/status/reopen flow подтвержден;
 - product logs пишутся и доходят в Loki/Grafana;
+- Loki category label работает;
 - product metrics доступны на `/metrics` и собираются Prometheus;
-- alerts по app/API проверены;
 - системные метрики доступны Prometheus через node_exporter.
