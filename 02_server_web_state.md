@@ -6,8 +6,8 @@
 
 Роль:
 
-- отдавать frontend Mini Support Desk;
-- принимать пользовательские HTTP-запросы;
+- отдавать frontend `MISIS_Digital Student Support`;
+- принимать пользовательские HTTP-запросы из браузера;
 - проксировать `/api/*` на `app:8080`;
 - писать nginx access/error logs;
 - отправлять nginx logs в Loki через Promtail;
@@ -40,6 +40,7 @@ systemctl status nginx --no-pager
 sudo nginx -t
 ss -tulpn | grep :80
 curl http://localhost/
+curl -s http://localhost/api/v1/health | python3 -m json.tool
 ```
 
 Подтверждено:
@@ -47,9 +48,10 @@ curl http://localhost/
 - `nginx.service active (running)`;
 - порт `80` слушается;
 - `sudo nginx -t` успешен;
-- frontend Mini Support Desk отдается с `web`.
+- frontend `MISIS_Digital Student Support` отдается с `web`;
+- proxy `/api/v1/* -> app:/v1/*` работает.
 
-## Frontend Mini Support Desk
+## Frontend MISIS_Digital Student Support
 
 Файл:
 
@@ -57,20 +59,55 @@ curl http://localhost/
 /var/www/html/index.html
 ```
 
-Backup перед изменением:
+Backup-и:
 
 ```text
 /var/www/html/index.html.bak-before-supportdesk
+/var/www/html/index.html.bak-before-misis-digital-v2
 ```
 
-Функциональность страницы:
+Текущая функциональность страницы:
 
-- показывает backend status через `GET /api/health`;
-- показывает список заявок через `GET /api/tickets`;
-- создает заявку через `POST /api/tickets`;
-- меняет статус заявки через `PATCH /api/tickets/<id>/status`;
-- показывает Last API response;
-- отображает backend UTC time и local browser time.
+- показывает backend status через `GET /api/v1/health`;
+- получает модель сервисов/разделов через `GET /api/v1/support-model`;
+- показывает список active-заявок через `GET /api/v1/tickets`;
+- показывает resolved-заявки через `GET /api/v1/tickets?status=resolved`;
+- показывает все заявки через `GET /api/v1/tickets/all`;
+- создает заявку через `POST /api/v1/tickets`;
+- меняет статус через `PATCH /api/v1/tickets/<id>/status`;
+- поддерживает flow `open -> in_progress -> resolved` и reopen из `resolved` обратно в `open`;
+- показывает Last API response.
+
+Продуктовая модель:
+
+```text
+category = цифровой сервис университета
+resource = раздел/функция внутри выбранного сервиса
+```
+
+Текущие категории в UI:
+
+```text
+newlms.misis.ru
+lk.misis.ru
+gornyak.misis.ru
+folio.misis.ru
+pulse.misis.ru
+vector.misis.ru
+pay.misis.ru
+```
+
+В API/logs/metrics используются короткие slug-и без `.ru`:
+
+```text
+newlms-misis
+lk-misis
+gornyak-misis
+folio-misis
+pulse-misis
+vector-misis
+pay-misis
+```
 
 Полный текущий код `index.html` фиксируется в `06_config_files_current.md`, а не дублируется здесь.
 
@@ -106,21 +143,15 @@ location /api/ {
 Смысл mapping:
 
 ```text
-/api/health              -> app:/health
-/api/tickets             -> app:/tickets
-/api/tickets/<id>/status -> app:/tickets/<id>/status
-/api/metrics             -> app:/metrics
+/api/health                    -> app:/health
+/api/v1/health                 -> app:/v1/health
+/api/v1/support-model          -> app:/v1/support-model
+/api/v1/tickets                -> app:/v1/tickets
+/api/v1/tickets?status=...     -> app:/v1/tickets?status=...
+/api/v1/tickets/all            -> app:/v1/tickets/all
+/api/v1/tickets/<id>/status    -> app:/v1/tickets/<id>/status
+/api/metrics                   -> app:/metrics
 ```
-
-Проверки:
-
-```bash
-curl -s http://localhost/api/health | python3 -m json.tool
-curl -s http://localhost/api/tickets | python3 -m json.tool
-curl -s http://192.168.85.131/api/health | python3 -m json.tool
-```
-
-Результат: `support-desk-api` отвечает через `web` reverse proxy.
 
 ## Nginx logs
 
@@ -131,13 +162,15 @@ curl -s http://192.168.85.131/api/health | python3 -m json.tool
 /var/log/nginx/error.log
 ```
 
-После Mini Support Desk flow подтверждены строки вида:
+После Product model v2 flow подтверждены строки вида:
 
 ```text
-GET /api/health HTTP/1.1 200
-GET /api/tickets HTTP/1.1 200
-POST /api/tickets HTTP/1.1 201
-PATCH /api/tickets/6/status HTTP/1.1 200
+GET /api/v1/health HTTP/1.1 200
+GET /api/v1/support-model HTTP/1.1 200
+GET /api/v1/tickets HTTP/1.1 200
+GET /api/v1/tickets?status=resolved HTTP/1.1 200
+POST /api/v1/tickets HTTP/1.1 201
+PATCH /api/v1/tickets/<id>/status HTTP/1.1 200
 ```
 
 Promtail читает `/var/log/nginx/*.log` и отправляет logs в Loki с labels:
@@ -160,7 +193,13 @@ X-Forwarded-For
 X-Forwarded-Proto
 ```
 
-Сейчас `app` логирует TCP peer как `client_ip`, поэтому в app logs виден `client_ip=192.168.85.131`. Улучшение логирования `x_real_ip` и `x_forwarded_for` вынесено в future backlog.
+`app` логирует:
+
+```text
+client_ip        = TCP peer для backend-а; обычно web/Nginx: 192.168.85.131
+x_forwarded_for  = исходный клиент до Nginx; обычно Windows/Browser: 192.168.85.1
+x_forwarded_proto = схема исходного запроса; сейчас http
+```
 
 ## node_exporter
 
@@ -178,10 +217,10 @@ prometheus-node-exporter.service
 
 ## Текущий статус
 
-`web` считается готовым frontend/reverse proxy node для Mini Support Desk:
+`web` считается готовым frontend/reverse proxy node для `MISIS_Digital Student Support`:
 
-- Nginx отдает frontend;
+- Nginx отдает новый frontend;
 - `/api/*` проксируется на `app:8080`;
-- Browser -> web -> app flow подтвержден;
+- Browser -> web -> app/v1 flow подтвержден;
 - nginx logs уходят в Loki;
 - системные метрики доступны Prometheus через node_exporter.
