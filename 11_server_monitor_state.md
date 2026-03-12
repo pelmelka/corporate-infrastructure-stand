@@ -59,6 +59,8 @@ service="support-desk-api"
 env="lab"
 ```
 
+Примечание: Prometheus job/label `supportdesk-api` пока сохранен для совместимости с текущими panels и alert rules. Само приложение теперь называется `misis-digital-student-support-api`.
+
 Проверенные product metrics:
 
 ```text
@@ -66,6 +68,7 @@ supportdesk_tickets_total
 supportdesk_tickets_open
 supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
+supportdesk_tickets_active
 ```
 
 ## Prometheus alert rules
@@ -92,7 +95,7 @@ HighDiskUsage           warning    root filesystem usage >80%
 NodeTargetDown          critical   up{job="node"} == 0
 ```
 
-Проверено:
+Проверено ранее:
 
 - `SupportDeskApiDown` переходит в FIRING при остановке `app.service`;
 - alert доходит до Alertmanager, проверено через `amtool`;
@@ -163,7 +166,7 @@ Disk Usage by host
 CPU Usage by host
 RAM Usage by host
 SupportDesk API UP
-SupportDesk Tickets
+SupportDesk Tickets / Student Support Tickets
 Active Alerts
 Web nginx logs
 App logs
@@ -175,43 +178,53 @@ Product panels:
 SupportDesk API UP:
   up{job="supportdesk-api"}
 
-SupportDesk Tickets:
+SupportDesk Tickets / Student Support Tickets:
   supportdesk_tickets_total{job="supportdesk-api"}
   supportdesk_tickets_open{job="supportdesk-api"}
   supportdesk_tickets_in_progress{job="supportdesk-api"}
   supportdesk_tickets_resolved{job="supportdesk-api"}
+  supportdesk_tickets_active{job="supportdesk-api"}
 
 Active Alerts:
   sum(ALERTS{alertstate="firing"}) or vector(0)
 ```
 
-App logs panel использует новый label:
+App logs panel использует новый Loki stream:
 
 ```logql
-{host="app", job="app", service="support-desk-api"}
+{host="app", job="app", service="misis-digital-student-support-api"}
 | logfmt
-| line_format "{{.event}} | {{.method}} {{.path}} | status={{.status}} | ticket={{.ticket_id}} | {{.old_status}} -> {{.new_status}} | client={{.x_forwarded_for}} | proxy={{.client_ip}}"
+| line_format "{{.event}} | {{.method}} {{.path}} | status={{.status}} | category={{.category}} | resource={{.resource}} | ticket={{.ticket_id}} | {{.old_status}} -> {{.new_status}} | client={{.x_forwarded_for}} | proxy={{.client_ip}}"
 ```
 
-## Product logs после logging polish
+`ticket_list_requested` оставлен в panel сознательно: он показывает активность UI/API, а не только изменения заявок.
+
+## Product logs после Product model v2
 
 Grafana/Loki подтверждает прием новых app product logs.
 
-Проверенный запрос:
+Проверенные запросы:
 
 ```logql
-{host="app", job="app", service="support-desk-api"}
+{host="app", job="app", service="misis-digital-student-support-api"}
+```
+
+```logql
+{host="app", job="app", category="gornyak-misis"}
+```
+
+```logql
+{host="app", job="app", category="lk-misis"}
 ```
 
 Видны события:
 
 ```text
-event=ticket_created
+event=ticket_created category=gornyak-misis resource=plumber-request
+event=ticket_created category=lk-misis resource=gradebook
 event=ticket_status_changed
 event=ticket_status_unchanged
-event=ticket_validation_failed
-event=ticket_not_found
-event=endpoint_not_found
+event=ticket_list_requested
 event=metrics_requested
 ```
 
@@ -219,11 +232,9 @@ event=metrics_requested
 
 `monitor` готов как observability node:
 
-- Prometheus active/enabled;
-- Grafana active/enabled;
-- Alertmanager active/enabled;
-- node_exporter targets `4/4 up`;
-- supportdesk-api target `1/1 up`;
-- Grafana datasources подключены;
-- Infrastructure Overview показывает infrastructure metrics, product metrics, active alerts и logs;
-- базовые infrastructure/product alerts созданы и протестированы.
+- Prometheus собирает system metrics и product metrics;
+- Grafana показывает dashboard `Infrastructure Overview`;
+- Loki datasource показывает web/app logs;
+- App logs panel обновлена под `MISIS_Digital Student Support`;
+- Alertmanager принимает alerts;
+- текущий следующий monitoring/product шаг — `Product observability v2`: metrics и alerts по `category/resource/priority/source`.
