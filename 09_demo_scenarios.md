@@ -2,18 +2,18 @@
 
 ## Сценарий 1. Нормальная работа системы
 
-Цель: показать, что frontend, backend, логирование, мониторинг и alerts работают вместе на примере продукта Mini Support Desk.
+Цель: показать, что frontend, backend, логирование, мониторинг и alerts работают вместе на примере продукта `MISIS_Digital Student Support`.
 
 Шаги:
 
 1. Открыть `http://192.168.85.131`.
 2. Проверить, что Backend status показывает `OK`.
-3. Создать заявку через форму Mini Support Desk.
+3. Создать заявку через форму `MISIS_Digital Student Support`.
 4. Изменить статус заявки.
 5. Проверить backend через web reverse proxy:
 
 ```bash
-curl http://192.168.85.131/api/health
+curl http://192.168.85.131/api/v1/health
 ```
 
 6. Проверить nginx logs на `web`:
@@ -31,20 +31,21 @@ sudo tail -n 30 /var/log/app/app.log
 8. Проверить Loki/Grafana:
 
 ```logql
-{host="app", job="app", service="support-desk-api"}
+{host="app", job="app", service="misis-digital-student-support-api"}
 ```
 
 9. Проверить Grafana dashboard:
 
 ```text
 SupportDesk API UP = UP
-SupportDesk Tickets меняется после создания/изменения заявки
+SupportDesk Tickets / Student Support Tickets меняется после создания/изменения заявки
+App logs показывает category/resource
 Active Alerts = OK
 ```
 
 Ожидаемый итог: Browser -> web -> app работает; пользовательские действия создают product logs; nginx logs и app logs видны в Loki/Grafana; product metrics меняются в Prometheus/Grafana.
 
-## Сценарий 2. Mini Support Desk product flow
+## Сценарий 2. MISIS_Digital Student Support product flow
 
 Цель: показать продуктовый сценарий, а не просто infrastructure healthcheck.
 
@@ -52,35 +53,58 @@ Active Alerts = OK
 
 1. Открыть `http://192.168.85.131`.
 2. Создать заявку:
-   - Title: `Browser test ticket`
-   - Description: `Created from Mini Support Desk web UI`
+   - Digital service: `newlms.misis.ru`
+   - Service section: `Schedule`
+   - Description: `В расписании отображается неправильная аудитория`
    - Priority: `high`
-3. Изменить статус заявки на `in_progress`.
-4. Изменить статус заявки на `resolved`.
-5. Проверить web logs:
+3. Проверить, что заявка появилась во вкладке `Active`.
+4. Изменить статус заявки на `in_progress`.
+5. Изменить статус заявки на `resolved`.
+6. Проверить, что заявка исчезла из `Active`.
+7. Проверить, что заявка появилась во вкладке `Resolved`.
+8. Проверить web logs:
 
 ```text
-POST /api/tickets HTTP/1.1 201
-PATCH /api/tickets/<id>/status HTTP/1.1 200
+POST /api/v1/tickets HTTP/1.1 201
+PATCH /api/v1/tickets/<id>/status HTTP/1.1 200
+GET /api/v1/tickets?status=resolved HTTP/1.1 200
 ```
 
-6. Проверить app logs:
+9. Проверить app logs:
 
 ```text
-event=ticket_created
-event=ticket_status_changed
+event=ticket_created category=newlms-misis resource=schedule
+event=ticket_status_changed old_status=open new_status=in_progress category=newlms-misis resource=schedule
+event=ticket_status_changed old_status=in_progress new_status=resolved category=newlms-misis resource=schedule
 ```
 
-7. Проверить Loki/Grafana:
+10. Проверить Loki/Grafana:
 
 ```logql
-{host="app", job="app", service="support-desk-api"}
-| logfmt
+{host="app", job="app", service="misis-digital-student-support-api", category="newlms-misis"}
 ```
 
 Ожидаемый итог: UI action -> web access log -> app product log -> Loki/Grafana -> product metrics.
 
-## Сценарий 3. Status unchanged behavior
+## Сценарий 3. Category/resource validation
+
+Цель: показать, что backend понимает предметную модель и не принимает неверные пары.
+
+Проверка через API:
+
+```bash
+curl -s -X POST http://192.168.85.131/api/v1/tickets   -H "Content-Type: application/json"   -d '{"category":"newlms-misis","resource":"plumber-request","description":"bad pair","priority":"normal","source":"api"}'   | python3 -m json.tool
+```
+
+Ожидаемый ответ:
+
+```text
+invalid_resource_for_category:newlms-misis:plumber-request
+```
+
+Смысл: `plumber-request` относится к `gornyak-misis`, но не к `newlms-misis`.
+
+## Сценарий 4. Status unchanged behavior
 
 Цель: показать, что backend отличает реальное изменение статуса от повторного выбора текущего статуса.
 
@@ -92,13 +116,33 @@ event=ticket_status_changed
 4. Проверить app logs:
 
 ```text
-event=ticket_status_unchanged old_status=open new_status=open
-event=ticket_status_changed old_status=open new_status=in_progress
+event=ticket_status_unchanged old_status=in_progress new_status=in_progress
+event=ticket_status_changed old_status=in_progress new_status=resolved
 ```
 
 Ожидаемый итог: повторное нажатие текущего статуса не называется изменением.
 
-## Сценарий 4. Proxy metadata in app logs
+## Сценарий 5. Reopen resolved ticket
+
+Цель: показать, что resolved-заявка хранится в истории и может быть открыта заново.
+
+Шаги:
+
+1. Перевести заявку в `resolved`.
+2. Убедиться, что она исчезла из `Active`.
+3. Открыть вкладку `Resolved`.
+4. Нажать `Reopen`.
+5. Убедиться, что заявка снова появилась в `Active`.
+6. Проверить API:
+
+```bash
+curl -s http://192.168.85.131/api/v1/tickets | python3 -m json.tool --no-ensure-ascii
+curl -s 'http://192.168.85.131/api/v1/tickets?status=resolved' | python3 -m json.tool --no-ensure-ascii
+```
+
+Ожидаемый итог: при reopen статус становится `open`, а `resolved_at` сбрасывается в `null`.
+
+## Сценарий 6. Proxy metadata in app logs
 
 Цель: показать различие между TCP peer и исходным клиентом до reverse proxy.
 
@@ -117,7 +161,7 @@ client_ip        = web/Nginx, который реально подключилс
 x_forwarded_for  = Windows/Browser как исходный клиент
 ```
 
-## Сценарий 5. App service down + SupportDeskApiDown alert
+## Сценарий 7. App service down + SupportDeskApiDown alert
 
 Цель: показать troubleshooting backend-сервиса через пользовательский путь и alerting.
 
@@ -128,7 +172,7 @@ x_forwarded_for  = Windows/Browser как исходный клиент
 sudo systemctl stop app.service
 
 # web/admin
-curl http://192.168.85.131/api/health
+curl http://192.168.85.131/api/v1/health
 
 # monitor / Prometheus UI
 # открыть /targets и /alerts
@@ -136,7 +180,7 @@ curl http://192.168.85.131/api/health
 # app
 sudo systemctl start app.service
 systemctl status app.service --no-pager
-curl http://localhost:8080/health
+curl http://localhost:8080/v1/health
 ```
 
 Ожидаемый итог:
@@ -147,9 +191,9 @@ SupportDeskApiDown -> PENDING -> FIRING
 после восстановления app.service alert исчезает
 ```
 
-## Сценарий 6. TooManyOpenTickets product alert
+## Сценарий 8. TooManyOpenTickets product alert
 
-Цель: показать product-level alerting.
+Цель: показать product-level alerting по текущей общей метрике.
 
 Шаги:
 
@@ -170,7 +214,47 @@ TooManyOpenTickets -> PENDING -> FIRING
 
 После проверки перевести часть заявок в `in_progress` или `resolved`, чтобы open стало меньше 3.
 
-## Сценарий 7. HighDiskUsage alert test
+## Сценарий 9. Future LMS schedule incident by category/resource
+
+Цель: будущая демонстрация Product observability v2.
+
+Идея:
+
+1. Создать несколько заявок:
+
+```text
+category=newlms-misis
+resource=schedule
+```
+
+2. Prometheus product metrics фиксируют рост open tickets by category/resource.
+3. Grafana показывает концентрацию заявок по `newlms-misis / schedule`.
+4. Alertmanager показывает alert вида `SupportDeskTooManyTicketsForResource`.
+
+Этот сценарий пока не реализован полностью, потому что category/resource metrics запланированы на следующий этап.
+
+## Сценарий 10. Loki category label filtering
+
+Цель: показать, что логи можно фильтровать по цифровому сервису университета.
+
+Запросы в Grafana Explore:
+
+```logql
+{host="app", job="app", category="gornyak-misis"}
+```
+
+```logql
+{host="app", job="app", category="lk-misis"}
+```
+
+```logql
+{host="app", job="app", service="misis-digital-student-support-api", category="pay-misis"}
+|= "resource=dorm-payment"
+```
+
+Ожидаемый итог: Loki показывает только события выбранной категории или ресурса.
+
+## Сценарий 11. HighDiskUsage alert test
 
 Цель: проверить disk alert без реального забивания диска.
 
@@ -189,7 +273,7 @@ TooManyOpenTickets -> PENDING -> FIRING
 HighDiskUsage срабатывает при тестовом пороге и становится inactive после возврата >80.
 ```
 
-## Сценарий 8. NodeTargetDown alert
+## Сценарий 12. NodeTargetDown alert
 
 Цель: показать alert по недоступности node_exporter target.
 
@@ -215,7 +299,7 @@ NodeTargetDown -> PENDING -> FIRING
 после восстановления node_exporter alert исчезает
 ```
 
-## Сценарий 9. Active Alerts panel
+## Сценарий 13. Active Alerts panel
 
 Цель: показать, что состояние alert-ов видно прямо на dashboard.
 
@@ -232,36 +316,7 @@ sum(ALERTS{alertstate="firing"}) or vector(0)
 при firing alert -> показывает проблему
 ```
 
-## Сценарий 10. App validation and not_found logs
-
-Цель: показать диагностические WARN-события backend-а.
-
-Шаги:
-
-```bash
-curl -s -X POST http://192.168.85.131/api/tickets \
-  -H "Content-Type: application/json" \
-  -d '{"title":"","description":"test validation","priority":"high","source":"web"}'
-
-curl -s -X PATCH http://192.168.85.131/api/tickets/1/status \
-  -H "Content-Type: application/json" \
-  -d '{"status":"bad_status","source":"web"}'
-
-curl -s http://192.168.85.131/api/tickets/999999
-curl -s http://192.168.85.131/api/bad-endpoint
-```
-
-Проверить:
-
-```logql
-{host="app", job="app", service="support-desk-api"} |= "ticket_validation_failed"
-{host="app", job="app", service="support-desk-api"} |= "ticket_not_found"
-{host="app", job="app", service="support-desk-api"} |= "endpoint_not_found"
-```
-
-Ожидаемый итог: backend validation и diagnostic logs работают. Если пустой Title вводится через UI, frontend блокирует запрос до отправки, поэтому backend log не появляется — это нормальное поведение.
-
-## Сценарий 11. Infrastructure overview
+## Сценарий 14. Infrastructure overview
 
 Цель: показать Grafana dashboard `Infrastructure Overview`.
 
@@ -273,12 +328,12 @@ curl -s http://192.168.85.131/api/bad-endpoint
 - `monitor` UP;
 - `supportdesk-api` UP;
 - CPU/RAM/Disk по каждому узлу;
-- SupportDesk Tickets;
+- SupportDesk Tickets / Student Support Tickets;
 - Active Alerts;
 - web nginx logs;
-- app logs.
+- app logs с `category/resource`.
 
-## Сценарий 12. Admin/Ansible operational control
+## Сценарий 15. Admin/Ansible operational control
 
 Цель: показать, что `admin` работает как Ansible control node и может управлять/проверять инфраструктуру из одного места.
 
@@ -311,35 +366,20 @@ restart_app.yml перезапускает app.service и проверяет /he
 
 Смысл демонстрации: инфраструктура уже частично управляется как code — через Git-tracked Ansible inventory/playbook'и на `admin`, а не только ручными командами на каждом сервере.
 
-## Сценарий 13. Future Product incident from resource/category
-
-Цель: будущая демонстрация product-level alerting по resource/category.
-
-Идея:
-
-1. Создать несколько заявок на один ресурс, например `grafana`.
-2. Создать несколько заявок по категории `observability`.
-3. Prometheus product metrics фиксируют рост open tickets by resource/category.
-4. Alertmanager показывает alert вида `SupportDeskTooManyTicketsForResource` или `SupportDeskCategoryIncident`.
-
-Этот сценарий пока не реализован. Детали — в roadmap и `12_future_improvements_backlog.md`.
-
-## Сценарий 14. Future Dockerized app
+## Сценарий 16. Future Dockerized app
 
 Цель: будущая демонстрация Docker как способа доставки backend-а.
 
 Идея:
 
 ```text
-app.service или docker compose запускает support-desk-api container
+app.service или docker compose запускает misis-digital-student-support-api container
 web/Nginx продолжает ходить на app:8080
 Prometheus продолжает scrape app:8080/metrics
 Promtail продолжает читать /var/log/app/app.log через volume
 ```
 
-Ожидаемый итог: меняется способ запуска приложения, но внешний flow и observability остаются стабильными.
-
-## Сценарий 15. Future DB backup/restore
+## Сценарий 17. Future DB backup/restore
 
 Цель: будущая демонстрация stateful service recovery.
 
@@ -351,7 +391,7 @@ Promtail продолжает читать /var/log/app/app.log через volum
 4. Восстановить backup.
 5. Показать, что tickets вернулись.
 
-## Сценарий 16. Future Telegram ticket
+## Сценарий 18. Future Telegram ticket
 
 Цель: будущая демонстрация второго клиента к тому же API.
 

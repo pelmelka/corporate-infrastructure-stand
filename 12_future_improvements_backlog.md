@@ -2,280 +2,143 @@
 
 Этот файл хранит идеи будущих улучшений. Он нужен, чтобы не дублировать backlog по разным state/config sources. Текущие фактические состояния серверов фиксируются в server state files, а будущие улучшения — здесь.
 
-## Logging improvements
+## Product observability v2 для MISIS_Digital Student Support
 
-### 1. Structured JSON logs
+Следующий приоритетный блок после Product model v2.
 
-Перевести app product logs с текущего учебного `key=value` формата на structured JSON logs.
+### Metrics by category/resource
 
-Текущий формат:
-
-```text
-event=ticket_created method=POST path=/tickets status=201 ticket_id=6 source=web
-```
-
-Будущий формат:
-
-```json
-{"level":"INFO","service":"support-desk-api","event":"ticket_created","method":"POST","path":"/tickets","status":201,"ticket_id":6,"source":"web"}
-```
-
-Плюсы:
-
-- проще парсить в Loki/ELK/Splunk;
-- меньше зависимости от regexp;
-- удобнее фильтровать по `event`, `status`, `source`, `resource`, `category`;
-- лучше подходит для dashboards и alerts.
-
-Статус: не срочно. Текущий `key=value` формат нормально работает через LogQL `logfmt`.
-
-### 2. logrotate для `/var/log/app/app.log`
-
-Добавить ротацию app logs:
+Добавить в `/metrics`:
 
 ```text
-/var/log/app/app.log
-/var/log/app/app.log.1
-/var/log/app/app.log.2.gz
+supportdesk_tickets_by_status{status="open"}
+supportdesk_tickets_by_category{category="newlms-misis",status="open"}
+supportdesk_tickets_by_resource{category="newlms-misis",resource="schedule",status="open"}
+supportdesk_tickets_by_priority{priority="critical",status="open"}
+supportdesk_tickets_created_total{category,resource,priority,source}
+supportdesk_tickets_resolved_total{category,resource}
 ```
 
-Причина: без logrotate файл будет расти бесконечно.
-
-Статус: полезное небольшое улучшение, но не блокирует текущий проект.
-
-### 3. `metrics_requested` noise после Prometheus scrape
-
-После подключения Prometheus scrape `app:/metrics` в app logs регулярно появляются:
+Примеры продуктовых вопросов:
 
 ```text
-event=metrics_requested method=GET path=/metrics
+Сколько открытых заявок по newlms.misis.ru?
+Сколько проблем с schedule внутри newlms.misis.ru?
+Какие resources чаще всего получают заявки?
+Сколько critical-заявок сейчас открыто?
+Сколько заявок пришло из web, а сколько потом из Telegram?
 ```
 
-Варианты:
+### Grafana panels
 
-- оставить как есть — видно, что Prometheus реально ходит за метриками;
-- убрать `/metrics` из dashboard App logs query;
-- не логировать успешные `/metrics`, а логировать только ошибки;
-- писать технические events отдельно от product events.
-
-Статус: пока оставлено как есть.
-
-### 4. Request ID для связки Nginx log и app log
-
-Добавить `request_id`, чтобы связать один пользовательский запрос между слоями:
+Идеи panels:
 
 ```text
-nginx: request_id=abc123 PATCH /api/tickets/7/status -> 200
-app:   request_id=abc123 event=ticket_status_changed ticket_id=7
+Tickets by category
+Open tickets by category
+Top resources by open tickets
+Critical tickets by category
+Created tickets by source
+Resolved tickets by category
 ```
 
-Потребуется:
+### Product alerts
 
-- добавить/использовать request id в Nginx;
-- передавать header в app;
-- логировать `request_id` в app logs;
-- обновить Nginx log_format.
-
-### 5. duration_ms / request_time / upstream_response_time
-
-Добавить время обработки запросов:
+Идеи alerts:
 
 ```text
-app log: duration_ms=12
-nginx log: request_time=0.013 upstream_response_time=0.011
-```
-
-Это позволит различать:
-
-- сколько запрос занял на Nginx;
-- сколько реально обрабатывал backend;
-- где появилась задержка.
-
-## Product/data improvements
-
-### 1. Resource/category fields in tickets
-
-Добавить в ticket model поля:
-
-```text
-resource
-category
+SupportDeskTooManyTicketsForCategory
+SupportDeskTooManyTicketsForResource
+SupportDeskCriticalTicketsOpen
+SupportDeskTicketSpike
 ```
 
 Примеры:
 
 ```text
-resource=grafana, category=observability
-resource=prometheus, category=observability
-resource=loki, category=observability
-resource=vpn, category=access
-resource=ssh, category=access
-resource=web, category=application
-resource=app, category=application
-resource=database, category=database
-resource=telegram-bot, category=application
+category=newlms-misis resource=schedule >= 3 open tickets
+→ Possible newlms.misis.ru schedule incident
+
+category=gornyak-misis resource=plumber-request >= 3 open tickets
+→ Possible gornyak.misis.ru service request issue
+
+priority=critical status=open > 0 for 5m
+→ Critical student support ticket is open
 ```
 
-Использование:
+## Logging improvements
 
-- заменить/дополнить свободный `Title` dropdown-ами `Resource` и `Category`;
-- писать `resource` и `category` в product logs;
-- фильтровать tickets в Loki по resource/category;
-- строить product metrics и alerts по resource/category.
+### Оставить category как Loki label
 
-### 2. Active/resolved tickets
+Уже реализовано: Promtail на `app` добавляет `category` как dynamic Loki label.
 
-Сделать так, чтобы при переходе в `resolved` заявка исчезала из активного списка, но сохранялась в истории.
-
-Возможная API-логика:
+Текущий подход считается правильным:
 
 ```text
-GET /tickets                  -> open + in_progress
-GET /tickets?status=resolved  -> resolved
-GET /tickets/all              -> all tickets
-GET /tickets/<id>             -> конкретная заявка независимо от статуса
+хорошие labels: env, host, job, service, category
+оставить в log fields: resource, ticket_id, client_ip, path, description
 ```
 
-Добавить поле:
+`resource` пока не выносить в Loki label, чтобы не увеличивать cardinality без необходимости. Для фильтрации достаточно:
+
+```logql
+{host="app", job="app", service="misis-digital-student-support-api", category="pay-misis"}
+|= "resource=dorm-payment"
+```
+
+### Возможное улучшение App logs panel
+
+Пока `ticket_list_requested` оставлен в dashboard, потому что он показывает активность UI/API. Если dashboard станет слишком шумным, можно создать две панели:
 
 ```text
-resolved_at
+App activity logs     -> включает ticket_list_requested
+Ticket change events  -> только ticket_created/ticket_status_changed/ticket_status_unchanged
 ```
 
-### 3. API versioning
+### Dashboard JSON export
 
-Позже перейти с:
+Экспортировать Grafana dashboard JSON и хранить его в проектных источниках или в `~/control-node/files/grafana/`.
+
+Плюсы:
 
 ```text
-/api/tickets
+можно восстановить dashboard после переустановки Grafana
+можно отслеживать изменения dashboard в Git
 ```
 
-на:
+## HTTP/request observability
 
-```text
-/api/v1/tickets
-```
-
-Это нужно, если API будет развиваться и потребуется сохранить совместимость frontend/bot с разными версиями backend.
-
-### 4. Ticket events/history
-
-Добавить таблицу/модель истории:
-
-```text
-ticket_events:
-- ticket_created
-- status_changed
-- comment_added
-- ticket_resolved
-```
-
-Польза:
-
-- аудит изменений;
-- история заявки;
-- richer product logs;
-- метрики resolution time.
-
-## Monitoring improvements
-
-### 1. Product metrics by resource/category
-
-После появления `resource` и `category` добавить:
-
-```text
-supportdesk_tickets_by_resource{resource="grafana",status="open"}
-supportdesk_tickets_by_category{category="observability",status="open"}
-supportdesk_tickets_by_priority{priority="critical",status="open"}
-supportdesk_tickets_created_total{resource,category,priority,source}
-supportdesk_tickets_resolved_total{resource,category}
-```
-
-### 2. Product alerts
-
-Будущие product alerts для Mini Support Desk:
-
-1. `SupportDeskTooManyOpenTickets` — слишком много открытых заявок вообще. Текущий вариант уже реализован как `TooManyOpenTickets`.
-2. `SupportDeskTicketSpike` — за короткий период создано слишком много заявок.
-3. `SupportDeskTooManyTicketsForResource` — много открытых заявок на один ресурс.
-4. `SupportDeskCategoryIncident` — много заявок по группе смежных ресурсов.
-5. `SupportDeskCriticalTicketsOpen` — есть открытые critical-заявки дольше N минут.
-
-### 3. HTTP status / error-rate alerts
-
-Добавить error-rate alerts по HTTP-статусам:
-
-- если доля 5xx ответов выше 5% за 5 минут — warning/critical alert;
-- если Nginx часто возвращает 502 — вероятно backend app недоступен;
-- если растет количество 500 от app — вероятно ошибка внутри backend-кода;
-- если растет количество 400/404 — возможно frontend вызывает неправильный API, пользователи отправляют некорректные данные или есть лишний/мусорный трафик.
-
-Для реализации желательно добавить application/request metrics:
+Добавить request-level метрики API:
 
 ```text
 supportdesk_requests_total{method,path,status}
 supportdesk_errors_total{status}
-supportdesk_request_duration_seconds
+supportdesk_request_duration_seconds_bucket
+supportdesk_request_duration_seconds_sum
+supportdesk_request_duration_seconds_count
 ```
 
-### 4. Prometheus client library
-
-Сейчас app `/metrics` реализован вручную. Это нормально для lab-этапа.
-
-Для production-like реализации позже перейти на Prometheus client library и добавить стандартные application metrics:
-
-- `supportdesk_requests_total`;
-- `supportdesk_request_duration_seconds`;
-- `supportdesk_errors_total`;
-- `supportdesk_tickets_created_total`;
-- `supportdesk_tickets_open`;
-- `supportdesk_tickets_by_status{status="open|in_progress|resolved"}`;
-- `supportdesk_tickets_by_resource{resource="grafana|vpn|web|app|..."}`;
-- `supportdesk_tickets_by_category{category="observability|access|application|..."}`.
-
-### 5. Monitoring of monitoring
-
-Текущая lab-схема single-node monitoring:
+Возможные alerts:
 
 ```text
-monitor = Prometheus + Grafana + Alertmanager
+SupportDeskHigh5xxRate
+SupportDeskHigh4xxRate
+SupportDeskHighLatency
+Nginx502Spike
 ```
 
-Ограничение: если весь `monitor` VM упадет, сам Prometheus не сможет отправить alert о собственном полном падении.
-
-Future improvement:
-
-```text
-admin или внешний watchdog -> monitor health endpoints
-```
-
-Проверки:
-
-```text
-monitor:9090/-/ready
-monitor:3000/api/health
-monitor:9093/-/ready
-```
-
-Варианты реализации:
-
-- lightweight cron/systemd timer на `admin`;
-- blackbox exporter;
-- второй Prometheus;
-- внешний uptime check.
+Желательно перейти с ручного `/metrics` на Prometheus client library.
 
 ## Dockerization
 
-Docker стоит добавить экологично как способ доставки приложения, а не как замена всей уже работающей инфраструктуры.
-
-Контейнеризировать:
+Экологичный scope:
 
 ```text
-support-desk-api
-support-bot позже
+Dockerize misis-digital-student-support-api
+Dockerize support-bot позже
 ```
 
-Пока не переносить:
+Не переносить в Docker на текущем этапе:
 
 ```text
 Prometheus
@@ -287,169 +150,139 @@ node_exporter
 admin
 ```
 
-План Docker stage:
+Требования:
 
 ```text
-1. Dockerfile для support-desk-api.
-2. docker-compose.yml на app.
-3. ports: "8080:8080".
-4. env_file для конфигурации.
-5. volume для /var/log/app/app.log, чтобы Promtail продолжал читать host-file.
-6. Проверить Nginx -> app:8080.
-7. Проверить Prometheus -> app:8080/metrics.
-8. Проверить Promtail -> Loki.
-9. Добавить Ansible deploy для docker compose.
+внешний порт app остается 8080
+Nginx продолжает ходить на app:8080
+Prometheus продолжает scrape app:8080/metrics
+Promtail продолжает читать /var/log/app/app.log через volume
 ```
 
-Плюсы:
+## PostgreSQL / storage
 
-- воспроизводимая доставка backend-а;
-- легче развивать bot;
-- шаг к CI/CD;
-- хороший production-like элемент.
+Текущий storage: `/opt/app/tickets.json`.
 
-Риски/усложнения:
-
-- нужно аккуратно сохранить logs/metrics;
-- нужно не потерять systemd-level управление;
-- не стоит сразу контейнеризировать весь observability stack.
-
-## PostgreSQL instead of tickets.json
-
-Сейчас Mini Support Desk хранит заявки в:
+Будущая таблица `tickets`:
 
 ```text
-/opt/app/tickets.json
+id
+schema_version
+category
+category_label
+resource
+resource_label
+description
+priority
+status
+source
+created_at
+updated_at
+resolved_at
 ```
 
-Это подходит для lab/pet-project этапа, потому что просто и наглядно.
-
-Для production-like реализации позже вынести данные в отдельную БД:
-
-- PostgreSQL как основной вариант для tickets;
-- MySQL как альтернативная relational DB;
-- Redis не как основное хранилище заявок, а скорее для cache/queues/rate limits/session-like временных данных.
-
-Причины:
-
-- JSON-файл неудобен при параллельных запросах;
-- сложнее делать фильтрацию, поиск, аналитику и историю изменений;
-- нет нормальных транзакций;
-- хуже масштабируется;
-- при нескольких app instances общий файл уже не подходит.
-
-Предпочтительный future path:
+Возможная таблица `ticket_events`:
 
 ```text
-app -> PostgreSQL на отдельной VM db
+id
+ticket_id
+event
+old_status
+new_status
+source
+created_at
+metadata_json
 ```
 
-## DB observability + backups
+## DB observability и backups
 
-После PostgreSQL добавить:
+После добавления PostgreSQL:
 
 ```text
-node_exporter на db
 postgres_exporter
-Prometheus scrape для db
-Grafana panels по DB
+PostgreSQL UP panel
+connections panel
+DB size panel
+transaction rate panel
 PostgreSQLDown alert
 TooManyConnections alert
-DatabaseDiskUsageHigh alert
 pg_dump backup
-restore demo
+restore test
 ```
 
-Ценность: появится полноценный stateful service и recovery story.
+## Telegram support bot
 
-## Telegram bot
+Будущий второй клиент к тому же API v1.
 
-Будущий компонент:
+Команды:
 
 ```text
-support-bot.service или support-bot container
+/start
+/new
+/tickets
+/resolve
 ```
 
-Архитектура:
+Требования:
 
 ```text
-Browser -> web -> app
-Telegram -> support-bot -> app
+создавать заявки через app API v1
+писать source=telegram
+использовать те же category/resource values
+bot token хранить вне Git
+bot logs отправлять в Loki
 ```
 
-Решение по сети уже проверено:
+## Security / hardening
+
+Идеи:
 
 ```text
-app VM -> 192.168.85.1:10802 -> Windows portproxy -> 127.0.0.1:10801 -> Invisible Man XRay -> Telegram API
+ограничить прямой доступ к app:8080
+ограничить db:5432 после появления DB
+добавить Nginx security headers
+добавить body size limit
+добавить proxy timeouts
+добавить rate limiting
+добавить HTTPS/self-signed cert или local CA
+секреты хранить вне Git
+права 600 на env-файлы
+DHCP reservation или static IP
 ```
 
-Подход:
+## Ansible automation v2
 
-- long polling;
-- outbound HTTP proxy;
-- bot token хранить в env-файле, не в коде;
-- bot создает/читает/закрывает tickets через тот же app API;
-- в tickets/logs писать `source=telegram`;
-- bot logs отправлять в Loki отдельным job/service;
-- позже добавить bot metrics.
+После ручной стабилизации Product model v2 стоит автоматизировать новую архитектуру.
 
-## Security/network improvements
-
-### 1. Restrict direct backend access
-
-Сейчас `app:8080` доступен внутри lab-сети. Для более production-like схемы позже ограничить доступ к backend так, чтобы `app:8080` принимал запросы только от `web` / trusted proxy / admin / bot.
-
-Это важно для безопасного использования proxy headers `X-Forwarded-For`.
-
-### 2. Restrict DB access
-
-После появления PostgreSQL:
+Идеи playbook/roles:
 
 ```text
-db:5432 принимает подключения только от app и admin
+app.yml                 deploy /opt/app/app.py
+frontend.yml            deploy /var/www/html/index.html
+promtail.yml            deploy promtail config with category label
+prometheus.yml          deploy prometheus config/rules
+grafana.yml             provision dashboard/datasources later
+docker_app.yml          deploy Dockerized app
+postgres.yml            deploy DB
+bot.yml                 deploy Telegram bot
+backup.yml              run DB backup
 ```
 
-### 3. HTTPS
+## Final README/demo packaging
 
-Позже добавить HTTPS termination на `web`:
-
-- self-signed certificate для lab;
-- или локальный CA;
-- или production-like cert workflow в финальном README.
-
-### 4. Nginx hardening
-
-Будущие настройки:
-
-- security headers;
-- request body size limit;
-- proxy timeouts;
-- rate limiting;
-- access control для admin/debug endpoints.
-
-### 5. Secrets management
-
-Минимально:
-
-- DB password в env-файле;
-- bot token в env-файле;
-- env-файлы не хранить в Git;
-- права `600`.
-
-## Ansible automation improvements
-
-После Admin/Ansible foundation добавить playbook-и/roles:
+Что собрать к финалу:
 
 ```text
-common.yml
-nginx.yml
-app.yml
-docker_app.yml
-promtail.yml
-prometheus.yml
-postgres.yml
-bot.yml
-backup.yml
+архитектура
+IP/порты/сервисы
+data flows
+команды проверки
+LogQL examples
+PromQL examples
+alerts list
+dashboard screenshots
+demo scripts
+troubleshooting scenarios
+backup/restore scenario
+Proxmox snapshots checklist
 ```
-
-Цель: сделать проект воспроизводимым, а не только вручную настроенным.
