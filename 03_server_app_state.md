@@ -41,8 +41,10 @@
 /opt/app/app.py.bak-before-logging
 /opt/app/app.py.bak-before-logging-polish
 /opt/app/app.py.bak-before-product-model-v2
+/opt/app/app.py.bak-before-product-observability-v2
 /opt/app/tickets.json
 /opt/app/tickets.json.bak-before-product-model-v2-...
+/opt/app/tickets.json.bak-before-product-observability-v2
 ```
 
 Старые заявки из Mini Support Desk v1 сохранены в backup `tickets.json.bak-before-product-model-v2-*`. Рабочий `/opt/app/tickets.json` очищен и используется только под новую модель v2. Категория `legacy` сознательно не используется.
@@ -240,6 +242,8 @@ GET /metrics
 
 Текущие метрики:
 
+Compatibility metrics:
+
 ```text
 supportdesk_tickets_total
 supportdesk_tickets_open
@@ -247,6 +251,17 @@ supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
 supportdesk_tickets_active
 ```
+
+Product observability v2 metrics:
+
+```text
+supportdesk_tickets_current{status,category,resource,priority}
+supportdesk_active_ticket_age_seconds_max{category,resource,priority}
+```
+
+`supportdesk_tickets_current` показывает текущее распределение заявок по статусу, цифровому сервису, ресурсу и приоритету.
+
+`supportdesk_active_ticket_age_seconds_max` считает максимальный возраст активной заявки (`open` или `in_progress`) по `category/resource/priority`. Значение считается как `now - created_at`, поэтому для незакрытой заявки оно растет от scrape к scrape.
 
 Prometheus на `monitor` собирает эти метрики отдельным scrape job:
 
@@ -258,7 +273,7 @@ service="support-desk-api"
 env="lab"
 ```
 
-Примечание: Prometheus job/metric names пока сохранены как `supportdesk-*`, чтобы не ломать существующие dashboard panels и alert rules. Переименование или добавление новых category/resource metrics запланировано на этап `Product observability v2`.
+Примечание: Prometheus job/metric names сохранены как `supportdesk-*`, чтобы не ломать существующие dashboard panels и alert rules. На этапе Product observability v2 добавлены только две минимальные product metrics; counters/source/duration отложены до PostgreSQL, `ticket_events` и Telegram/API-client stages.
 
 ## systemd unit приложения
 
@@ -293,7 +308,7 @@ curl -s http://localhost:8080/metrics
 - `/v1/health` возвращает `MISIS_Digital Student Support` JSON;
 - `/v1/support-model` возвращает список цифровых сервисов и ресурсов;
 - `/v1/tickets` возвращает active tickets;
-- `/metrics` возвращает product metrics;
+- `/metrics` возвращает product metrics, включая Product observability v2 metrics;
 - неверная пара `category/resource` возвращает validation error;
 - при остановке `app.service` alert `SupportDeskApiDown` переходит в `FIRING`.
 
@@ -361,4 +376,5 @@ category=<category из app log line>
 - product logs пишутся и доходят в Loki/Grafana;
 - Loki category label работает;
 - product metrics доступны на `/metrics` и собираются Prometheus;
+- Product observability v2 metrics `supportdesk_tickets_current` и `supportdesk_active_ticket_age_seconds_max` работают и видны в Prometheus/Grafana;
 - системные метрики доступны Prometheus через node_exporter.

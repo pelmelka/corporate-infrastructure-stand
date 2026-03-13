@@ -256,7 +256,12 @@ admin: ~/control-node/files/prometheus/supportdesk.rules.yml
       ansible.builtin.uri:
         url: http://localhost:9090/-/ready
         method: GET
-        status_code: 200
+        status_code: [200, 503]
+      register: prometheus_ready
+      retries: 10
+      delay: 3
+      until: prometheus_ready.status == 200
+      failed_when: prometheus_ready.status != 200
 
   handlers:
     - name: Restart prometheus
@@ -429,20 +434,40 @@ groups:
         for: 30s
         labels:
           severity: critical
-          service: support-desk-api
+          service: misis-digital-student-support-api
         annotations:
-          summary: "SupportDesk API is down"
-          description: "Prometheus cannot scrape supportdesk-api on {{ $labels.instance }} for more than 30 seconds."
+          summary: "MISIS_Digital Student Support API is down"
+          description: "Prometheus cannot scrape MISIS_Digital Student Support API on {{ $labels.instance }} for more than 30 seconds."
 
-      - alert: TooManyOpenTickets
-        expr: supportdesk_tickets_open{job="supportdesk-api"} >= 3
+      - alert: SupportDeskTooManyTicketsForResource
+        expr: sum by(category, resource) (supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress"}) >= 3
         for: 30s
         labels:
           severity: warning
-          service: support-desk-api
+          service: misis-digital-student-support-api
         annotations:
-          summary: "Too many open support tickets"
-          description: "There are {{ $value }} open support tickets in MISIS_Digital Student Support."
+          summary: "Too many active tickets for {{ $labels.category }} / {{ $labels.resource }}"
+          description: "There are {{ $value }} active tickets for {{ $labels.category }} / {{ $labels.resource }}."
+
+      - alert: SupportDeskCriticalTicketsOpen
+        expr: sum by(category, resource) (supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress",priority="critical"}) > 0
+        for: 30s
+        labels:
+          severity: critical
+          service: misis-digital-student-support-api
+        annotations:
+          summary: "Critical support ticket is open for {{ $labels.category }} / {{ $labels.resource }}"
+          description: "There are {{ $value }} active critical tickets for {{ $labels.category }} / {{ $labels.resource }}."
+
+      - alert: SupportDeskOldCriticalTicket
+        expr: max by(category, resource) (supportdesk_active_ticket_age_seconds_max{job="supportdesk-api",priority="critical"}) > 600
+        for: 30s
+        labels:
+          severity: critical
+          service: misis-digital-student-support-api
+        annotations:
+          summary: "Old critical support ticket for {{ $labels.category }} / {{ $labels.resource }}"
+          description: "The oldest active critical ticket for {{ $labels.category }} / {{ $labels.resource }} is {{ $value }} seconds old."
 
       - alert: HighDiskUsage
         expr: 100 * (1 - (node_filesystem_avail_bytes{job="node", mountpoint="/", fstype="ext4"} / node_filesystem_size_bytes{job="node", mountpoint="/", fstype="ext4"})) > 80
@@ -465,12 +490,15 @@ groups:
           description: "Prometheus cannot scrape node_exporter on {{ $labels.host }} at {{ $labels.instance }} for more than 30 seconds."
 ```
 
-Проверено до Product model v2:
+Проверено после Product observability v2:
 
-- `SupportDeskApiDown` срабатывает при остановке `app.service`;
-- `TooManyOpenTickets` срабатывает при `supportdesk_tickets_open >= 3`;
+- `SupportDeskApiDown` остается для API availability;
+- `SupportDeskTooManyTicketsForResource` срабатывает при концентрации active-заявок на одном `category/resource`;
+- `SupportDeskCriticalTicketsOpen` срабатывает при active critical-заявке;
+- `SupportDeskOldCriticalTicket` срабатывает при active critical-заявке старше 600 секунд;
 - `HighDiskUsage` проверен временным порогом `>20`, затем возвращен на `>80`;
-- `NodeTargetDown` срабатывает при остановке node_exporter на target node.
+- `NodeTargetDown` срабатывает при остановке node_exporter на target node;
+- старый `TooManyOpenTickets` удален как менее точный общий product alert.
 
 ## Alertmanager
 
@@ -534,6 +562,24 @@ supportdesk_tickets_open{job="supportdesk-api"}
 supportdesk_tickets_in_progress{job="supportdesk-api"}
 supportdesk_tickets_resolved{job="supportdesk-api"}
 supportdesk_tickets_active{job="supportdesk-api"}
+```
+
+Product Observability v2 panels:
+
+```promql
+sum by(category) (supportdesk_tickets_current{job="supportdesk-api",status="open"})
+```
+
+```promql
+topk(10, sum by(category, resource) (supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress"}))
+```
+
+```promql
+sum by(category, resource) (supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress",priority="critical"})
+```
+
+```promql
+topk(10, max by(category, resource, priority) (supportdesk_active_ticket_age_seconds_max{job="supportdesk-api"}))
 ```
 
 Active Alerts panel:
@@ -1183,6 +1229,8 @@ supportdesk_tickets_open
 supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
 supportdesk_tickets_active
+supportdesk_tickets_current{status,category,resource,priority}
+supportdesk_active_ticket_age_seconds_max{category,resource,priority}
 ```
 
 ### Полный текущий код `/opt/app/app.py`
@@ -1557,6 +1605,25 @@ def active_tickets(tickets):
     return [ticket for ticket in tickets if ticket["status"] in ACTIVE_STATUSES]
 
 
+def prometheus_label_value(value):
+    return clean_log_value(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def prometheus_labels(**labels):
+    return ",".join(
+        f'{key}="{prometheus_label_value(value)}"'
+        for key, value in labels.items()
+    )
+
+
+def ticket_age_seconds(ticket):
+    try:
+        created_at = datetime.fromisoformat(ticket["created_at"])
+        return max(0, int((datetime.now(timezone.utc) - created_at).total_seconds()))
+    except Exception:
+        return 0
+
+
 def make_list_payload(tickets, selected_tickets, selected_filter):
     return {
         "tickets": selected_tickets,
@@ -1766,6 +1833,32 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
 
             if path == "/metrics":
                 tickets = load_tickets()
+                active = active_tickets(tickets)
+
+                current_counts = {}
+                oldest_active_age = {}
+
+                for ticket in tickets:
+                    current_key = (
+                        ticket.get("status", "unknown"),
+                        ticket.get("category", "unknown"),
+                        ticket.get("resource", "unknown"),
+                        ticket.get("priority", "unknown"),
+                    )
+                    current_counts[current_key] = current_counts.get(current_key, 0) + 1
+
+                for ticket in active:
+                    age = ticket_age_seconds(ticket)
+                    age_key = (
+                        ticket.get("category", "unknown"),
+                        ticket.get("resource", "unknown"),
+                        ticket.get("priority", "unknown"),
+                    )
+                    oldest_active_age[age_key] = max(
+                        oldest_active_age.get(age_key, 0),
+                        age,
+                    )
+
                 lines = [
                     "# HELP supportdesk_tickets_total Total number of support desk tickets",
                     "# TYPE supportdesk_tickets_total gauge",
@@ -1781,9 +1874,34 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                     f"supportdesk_tickets_resolved {count_by_status(tickets, 'resolved')}",
                     "# HELP supportdesk_tickets_active Number of active support desk tickets",
                     "# TYPE supportdesk_tickets_active gauge",
-                    f"supportdesk_tickets_active {len(active_tickets(tickets))}",
-                    "",
+                    f"supportdesk_tickets_active {len(active)}",
+                    "# HELP supportdesk_tickets_current Current support desk tickets by status, category, resource and priority",
+                    "# TYPE supportdesk_tickets_current gauge",
                 ]
+
+                for (status, category, resource, priority), count in sorted(current_counts.items()):
+                    labels = prometheus_labels(
+                        status=status,
+                        category=category,
+                        resource=resource,
+                        priority=priority,
+                    )
+                    lines.append(f"supportdesk_tickets_current{{{labels}}} {count}")
+
+                lines.extend([
+                    "# HELP supportdesk_active_ticket_age_seconds_max Oldest active support desk ticket age in seconds by category, resource and priority",
+                    "# TYPE supportdesk_active_ticket_age_seconds_max gauge",
+                ])
+
+                for (category, resource, priority), age in sorted(oldest_active_age.items()):
+                    labels = prometheus_labels(
+                        category=category,
+                        resource=resource,
+                        priority=priority,
+                    )
+                    lines.append(f"supportdesk_active_ticket_age_seconds_max{{{labels}}} {age}")
+
+                lines.append("")
                 body = "\n".join(lines).encode("utf-8")
 
                 self.send_response(200)
