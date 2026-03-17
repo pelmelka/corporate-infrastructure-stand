@@ -191,47 +191,109 @@ SupportDeskApiDown -> PENDING -> FIRING
 после восстановления app.service alert исчезает
 ```
 
-## Сценарий 8. TooManyOpenTickets product alert
+## Сценарий 8. Deprecated TooManyOpenTickets product alert
 
-Цель: показать product-level alerting по текущей общей метрике.
+Старый общий alert `TooManyOpenTickets` удален после Product observability v2 cleanup.
+
+Причина:
+
+```text
+supportdesk_tickets_open >= 3
+```
+
+показывал только общее количество open-заявок и не отвечал на вопрос, где именно проблема. Его заменил более точный сценарий `SupportDeskTooManyTicketsForResource` по `category/resource`.
+
+## Сценарий 9. Product observability v2: resource incident by category/resource
+
+Цель: показать Product observability v2 — концентрацию заявок вокруг конкретного цифрового сервиса и ресурса.
 
 Шаги:
 
-1. Создать несколько open-заявок, чтобы `supportdesk_tickets_open >= 3`.
-2. Проверить Prometheus query:
-
-```promql
-supportdesk_tickets_open{job="supportdesk-api"}
-```
-
-3. Открыть Prometheus `/alerts`.
-
-Ожидаемый итог:
+1. Создать несколько active-заявок на один resource, например:
 
 ```text
-TooManyOpenTickets -> PENDING -> FIRING
+category=lk-misis
+resource=gradebook
+priority=high/normal
 ```
 
-После проверки перевести часть заявок в `in_progress` или `resolved`, чтобы open стало меньше 3.
-
-## Сценарий 9. Future LMS schedule incident by category/resource
-
-Цель: будущая демонстрация Product observability v2.
-
-Идея:
-
-1. Создать несколько заявок:
+или:
 
 ```text
 category=newlms-misis
 resource=schedule
+priority=high/normal
 ```
 
-2. Prometheus product metrics фиксируют рост open tickets by category/resource.
-3. Grafana показывает концентрацию заявок по `newlms-misis / schedule`.
-4. Alertmanager показывает alert вида `SupportDeskTooManyTicketsForResource`.
+2. Проверить Prometheus query:
 
-Этот сценарий пока не реализован полностью, потому что category/resource metrics запланированы на следующий этап.
+```promql
+sum by(category, resource) (
+  supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress"}
+)
+```
+
+3. Проверить Grafana panels:
+
+```text
+Open tickets by category
+Active tickets by category/resource
+```
+
+4. Открыть Prometheus `/alerts`.
+
+Ожидаемый итог:
+
+```text
+SupportDeskTooManyTicketsForResource -> PENDING -> FIRING
+```
+
+5. Проверить Alertmanager:
+
+```bash
+amtool --alertmanager.url=http://localhost:9093 alert
+```
+
+Ожидаемый итог: Alertmanager показывает active alert с конкретными `category/resource`.
+
+## Сценарий 9a. Critical ticket and old critical ticket alerts
+
+Цель: показать critical product alerts и SLA-like сигнал по возрасту active-заявки.
+
+Шаги:
+
+1. Создать active-заявку с priority `critical`, например:
+
+```text
+category=vector-misis
+resource=resume-upload
+priority=critical
+```
+
+2. Проверить Prometheus query:
+
+```promql
+sum by(category, resource) (
+  supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress",priority="critical"}
+)
+```
+
+3. Проверить age query:
+
+```promql
+max by(category, resource) (
+  supportdesk_active_ticket_age_seconds_max{job="supportdesk-api",priority="critical"}
+)
+```
+
+Ожидаемый итог:
+
+```text
+SupportDeskCriticalTicketsOpen -> PENDING -> FIRING
+SupportDeskOldCriticalTicket -> FIRING после превышения 600 секунд
+```
+
+Смысл: первый alert говорит, что critical-заявка есть; второй — что она уже слишком долго остается active.
 
 ## Сценарий 10. Loki category label filtering
 

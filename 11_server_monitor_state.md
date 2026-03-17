@@ -69,6 +69,8 @@ supportdesk_tickets_open
 supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
 supportdesk_tickets_active
+supportdesk_tickets_current{status,category,resource,priority}
+supportdesk_active_ticket_age_seconds_max{category,resource,priority}
 ```
 
 ## Prometheus alert rules
@@ -86,20 +88,26 @@ rule_files:
   - /etc/prometheus/supportdesk.rules.yml
 ```
 
-Текущие alerts:
+Текущие alerts после Product observability v2 cleanup:
 
 ```text
-SupportDeskApiDown      critical   up{job="supportdesk-api"} == 0
-TooManyOpenTickets      warning    supportdesk_tickets_open{job="supportdesk-api"} >= 3
-HighDiskUsage           warning    root filesystem usage >80%
-NodeTargetDown          critical   up{job="node"} == 0
+SupportDeskApiDown                    critical   up{job="supportdesk-api"} == 0
+SupportDeskTooManyTicketsForResource  warning    active tickets by category/resource >= 3
+SupportDeskCriticalTicketsOpen        critical   active critical tickets > 0
+SupportDeskOldCriticalTicket          critical   critical active ticket age > 600s
+HighDiskUsage                         warning    root filesystem usage >80%
+NodeTargetDown                        critical   up{job="node"} == 0
 ```
+
+Старый общий alert `TooManyOpenTickets` удален, потому что его заменил более точный product alert `SupportDeskTooManyTicketsForResource`.
 
 Проверено ранее:
 
 - `SupportDeskApiDown` переходит в FIRING при остановке `app.service`;
+- `SupportDeskTooManyTicketsForResource` переходит в FIRING при >=3 active tickets на одной паре `category/resource`;
+- `SupportDeskCriticalTicketsOpen` переходит в FIRING при active critical-заявке;
+- `SupportDeskOldCriticalTicket` переходит в FIRING, если active critical-заявка старше 600 секунд;
 - alert доходит до Alertmanager, проверено через `amtool`;
-- `TooManyOpenTickets` переходит в FIRING при open tickets >= 3;
 - `HighDiskUsage` проверен через временный тестовый порог `>20`, затем возвращен на `>80`;
 - `NodeTargetDown` переходит в FIRING при остановке node_exporter на target node.
 
