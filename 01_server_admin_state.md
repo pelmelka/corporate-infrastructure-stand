@@ -187,7 +187,7 @@ ansible-playbook playbooks/deploy_prometheus_rules.yml
 - `ping_all.yml` проходит по всем узлам;
 - `check_services.yml` проверяет ключевые systemd-сервисы без изменений (`changed=0`);
 - `restart_app.yml` перезапускает `app.service`, затем проверяет active status и `http://localhost:8080/health`;
-- `deploy_prometheus_rules.yml` деплоит `/etc/prometheus/supportdesk.rules.yml` на `monitor` с `promtool` validation, проверяет `prometheus.yml`, запускает handlers при изменении rules и проверяет `/-/ready`.
+- `deploy_prometheus_rules.yml` деплоит `/etc/prometheus/supportdesk.rules.yml` на `monitor` с `promtool` validation, проверяет `prometheus.yml`, запускает handlers при изменении rules и проверяет `/-/ready` с retries/delay, чтобы не падать на кратковременный `503` сразу после restart Prometheus.
 
 ## Operational playbook'и
 
@@ -197,7 +197,7 @@ ansible-playbook playbooks/deploy_prometheus_rules.yml
 ping_all.yml                  проверка Ansible-связности всех узлов
 check_services.yml            проверка ключевых сервисов web/app/log/monitor
 restart_app.yml               controlled restart app.service + healthcheck
-deploy_prometheus_rules.yml   деплой Prometheus alert rules + promtool validation + readiness check
+deploy_prometheus_rules.yml   деплой Prometheus alert rules + promtool validation + readiness check with retries
 ```
 
 `restart_app.yml` и `deploy_prometheus_rules.yml` используют `become: true` и `vars_prompt` для ввода `ansible_become_password`, чтобы не хранить sudo-пароль в файлах проекта.
@@ -255,9 +255,13 @@ master
 Сделаны commit'ы:
 
 ```text
+adaa6bd Clean up SupportDesk alert rules
+782db47 Improve Prometheus rules deploy readiness check
 cb5794d Add Ansible project directory placeholders
 b98b8f9 initial Ansible control node setup
 ```
+
+Коммит `782db47` также зафиксировал Product observability v2 Prometheus rules и улучшенный readiness check. Коммит `adaa6bd` удалил старый общий `TooManyOpenTickets` и обновил alert text/service labels под `MISIS_Digital Student Support`.
 
 `git status` после commit'ов показывает:
 
@@ -278,4 +282,4 @@ nothing to commit, working tree clean
 - первые operational playbook'и;
 - Git repo с первыми commit'ами.
 
-Следующий этап проекта: `Product model v2` — resource/category fields, active/resolved tickets, подготовка к `/api/v1/*`.
+Последний завершенный этап проекта: `Product observability v2` — category/resource/priority metrics, Grafana panels, product alerts and Prometheus rules cleanup.
