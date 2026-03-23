@@ -184,6 +184,8 @@ supportdesk_tickets_open
 supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
 supportdesk_tickets_active
+supportdesk_tickets_current{status,category,resource,priority}
+supportdesk_active_ticket_age_seconds_max{category,resource,priority}
 ```
 
 ### Grafana
@@ -199,6 +201,7 @@ CPU Usage by host
 RAM Usage by host
 SupportDesk API UP
 SupportDesk Tickets / Student Support Tickets
+Product Observability v2 panels
 Active Alerts
 Web nginx logs
 App logs
@@ -233,11 +236,15 @@ monitor: /etc/prometheus/supportdesk.rules.yml
 Текущие alerts:
 
 ```text
-SupportDeskApiDown      critical   app API /metrics недоступен
-TooManyOpenTickets      warning    слишком много open-заявок
-HighDiskUsage           warning    root filesystem >80%
-NodeTargetDown          critical   node_exporter target недоступен
+SupportDeskApiDown                    critical   app API /metrics недоступен
+SupportDeskTooManyTicketsForResource  warning    много active-заявок на одном category/resource
+SupportDeskCriticalTicketsOpen        critical   есть active critical-заявка
+SupportDeskOldCriticalTicket          critical   critical-заявка висит дольше 600 секунд
+HighDiskUsage                         warning    root filesystem >80%
+NodeTargetDown                        critical   node_exporter target недоступен
 ```
+
+Старый `TooManyOpenTickets` удален после Product observability v2 cleanup.
 
 Имена alert-ов пока сохранены, чтобы не ломать существующие rules/dashboard. Переименование и расширение alert-ов под category/resource запланировано на Product observability v2.
 
@@ -245,7 +252,7 @@ NodeTargetDown          critical   node_exporter target недоступен
 
 ### Product observability v2
 
-Следующий этап: добавить metrics/alerts по `category`, `resource`, `priority`, `source` для `MISIS_Digital Student Support`.
+Реализовано как минимальный production-like слой: current tickets by status/category/resource/priority, max age active ticket, Grafana panels и product alerts. Source/counters/duration metrics отложены до Telegram, PostgreSQL и event storage.
 
 ### Docker
 

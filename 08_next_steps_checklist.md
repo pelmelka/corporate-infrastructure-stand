@@ -141,27 +141,44 @@
 - [x] Старые Prometheus метрики не сломаны.
 - [x] Добавлена метрика `supportdesk_tickets_active`.
 
-## Текущий следующий этап: Product observability v2
+## Завершено: Product observability v2
 
-- [ ] Добавить metrics by `category`.
-- [ ] Добавить metrics by `category/resource`.
-- [ ] Добавить metrics by `priority`.
-- [ ] Добавить metrics by `source`.
-- [ ] Добавить counters `supportdesk_tickets_created_total{category,resource,priority,source}`.
-- [ ] Добавить counters `supportdesk_tickets_resolved_total{category,resource}`.
-- [ ] Добавить Grafana panels по категориям: `newlms-misis`, `lk-misis`, `gornyak-misis`, `pay-misis` и т.д.
-- [ ] Добавить panel по top resources.
-- [ ] Добавить alert `SupportDeskTooManyTicketsForCategory`.
-- [ ] Добавить alert `SupportDeskTooManyTicketsForResource`.
-- [ ] Добавить alert `SupportDeskCriticalTicketsOpen`.
+- [x] Перед изменениями созданы backup-и `/opt/app/app.py.bak-before-product-observability-v2` и `/opt/app/tickets.json.bak-before-product-observability-v2`.
+- [x] Старые compatibility metrics сохранены: `supportdesk_tickets_total`, `supportdesk_tickets_open`, `supportdesk_tickets_in_progress`, `supportdesk_tickets_resolved`, `supportdesk_tickets_active`.
+- [x] Добавлена метрика `supportdesk_tickets_current{status,category,resource,priority}`.
+- [x] Добавлена метрика `supportdesk_active_ticket_age_seconds_max{category,resource,priority}`.
+- [x] Prometheus scrape job `supportdesk-api` видит новые метрики.
+- [x] В Grafana добавлен блок Product Observability v2.
+- [x] Добавлена panel `Open tickets by category`.
+- [x] Добавлена panel `Active tickets by category/resource`.
+- [x] Добавлена panel `Critical active tickets`.
+- [x] Добавлена panel `Oldest active ticket age`.
+- [x] Добавлен alert `SupportDeskTooManyTicketsForResource`.
+- [x] Добавлен alert `SupportDeskCriticalTicketsOpen`.
+- [x] Добавлен alert `SupportDeskOldCriticalTicket`.
+- [x] Старый общий alert `TooManyOpenTickets` удален как дублирующий и менее точный.
+- [x] `SupportDeskApiDown` обновлен текстом и label `service=misis-digital-student-support-api`.
+- [x] Alertmanager получает новые alerts, проверено через `amtool`.
+- [x] `deploy_prometheus_rules.yml` улучшен: readiness check Prometheus использует retries/delay и не падает на кратковременный `503` после restart.
+- [x] Изменения в Ansible control-node зафиксированы в Git.
 
-## Далее: HTTP/request observability
+Отложено в будущие этапы:
 
-- [ ] Перейти на Prometheus client library или расширить ручной `/metrics`.
+- [ ] `source` dimension после появления Telegram/API-client.
+- [ ] `supportdesk_tickets_created_total{category,resource,priority,source}` после PostgreSQL / `ticket_events`.
+- [ ] `supportdesk_tickets_resolved_total{category,resource,priority,source}` после PostgreSQL / `ticket_events`.
+- [ ] `supportdesk_ticket_resolution_duration_seconds_*` после полноценной event/SLA observability.
+- [ ] Alerts `SupportDeskTicketSpike`, `SupportDeskCreatedOutpacesResolved`, `SupportDeskSlowResolution`, `SupportDeskNoResolutionsForActiveBacklog` после counters/duration metrics.
+
+## Текущий следующий этап: HTTP/request observability
+
+
+- [ ] Перейти на Prometheus client library или аккуратно расширить ручной `/metrics`.
 - [ ] Добавить `supportdesk_requests_total{method,path,status}`.
 - [ ] Добавить `supportdesk_errors_total{status}`.
 - [ ] Добавить `supportdesk_request_duration_seconds`.
 - [ ] Добавить HTTP status / error-rate alerts.
+- [ ] Не смешивать этот этап с event/SLA metrics заявок: `created_total`, `resolved_total` и `resolution_duration` оставить до PostgreSQL / `ticket_events`.
 
 ## Далее: Dockerization
 
@@ -178,6 +195,10 @@
 - [ ] Установить PostgreSQL.
 - [ ] Создать DB/user/schema.
 - [ ] Перевести app storage с `/opt/app/tickets.json` на PostgreSQL.
+- [ ] Добавить таблицу `ticket_events` или аналогичный event storage.
+- [ ] После event storage добавить `supportdesk_tickets_created_total{category,resource,priority,source}`.
+- [ ] После event storage добавить `supportdesk_tickets_resolved_total{category,resource,priority,source}`.
+- [ ] После event storage добавить `supportdesk_ticket_resolution_duration_seconds_*`.
 - [ ] Добавить DB env-файл для app.
 - [ ] Добавить postgres_exporter.
 - [ ] Добавить DB alerts.
@@ -190,6 +211,7 @@
 - [ ] Хранить bot token в env-файле.
 - [ ] Создавать/читать/закрывать tickets через тот же app API v1.
 - [ ] Писать `source=telegram`.
+- [ ] После появления Telegram/API-client добавить source dimension для product metrics, например `supportdesk_tickets_current_by_source{status,category,resource,priority,source}`.
 - [ ] Отправлять bot logs в Loki.
 
 ## Далее: hardening и финализация
