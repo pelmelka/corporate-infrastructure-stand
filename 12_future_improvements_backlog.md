@@ -2,69 +2,98 @@
 
 Этот файл хранит идеи будущих улучшений. Он нужен, чтобы не дублировать backlog по разным state/config sources. Текущие фактические состояния серверов фиксируются в server state files, а будущие улучшения — здесь.
 
-## Product observability v2 для MISIS_Digital Student Support
+## Product observability после этапа 13
 
-Следующий приоритетный блок после Product model v2.
+Этап 13 завершен в минимальном production-like scope.
 
-### Metrics by category/resource
-
-Добавить в `/metrics`:
+Реализовано сейчас:
 
 ```text
-supportdesk_tickets_by_status{status="open"}
-supportdesk_tickets_by_category{category="newlms-misis",status="open"}
-supportdesk_tickets_by_resource{category="newlms-misis",resource="schedule",status="open"}
-supportdesk_tickets_by_priority{priority="critical",status="open"}
-supportdesk_tickets_created_total{category,resource,priority,source}
-supportdesk_tickets_resolved_total{category,resource}
+supportdesk_tickets_current{status,category,resource,priority}
+supportdesk_active_ticket_age_seconds_max{category,resource,priority}
 ```
 
-Примеры продуктовых вопросов:
+Реализованные Grafana panels:
 
 ```text
-Сколько открытых заявок по newlms.misis.ru?
-Сколько проблем с schedule внутри newlms.misis.ru?
-Какие resources чаще всего получают заявки?
-Сколько critical-заявок сейчас открыто?
-Сколько заявок пришло из web, а сколько потом из Telegram?
-```
-
-### Grafana panels
-
-Идеи panels:
-
-```text
-Tickets by category
 Open tickets by category
-Top resources by open tickets
-Critical tickets by category
-Created tickets by source
-Resolved tickets by category
+Active tickets by category/resource
+Critical active tickets
+Oldest active ticket age
 ```
 
-### Product alerts
-
-Идеи alerts:
+Итоговые product alerts:
 
 ```text
-SupportDeskTooManyTicketsForCategory
+SupportDeskApiDown
 SupportDeskTooManyTicketsForResource
 SupportDeskCriticalTicketsOpen
-SupportDeskTicketSpike
+SupportDeskOldCriticalTicket
 ```
 
-Примеры:
+Старый `TooManyOpenTickets` удален как слишком общий и заменен более точным alert-ом по `category/resource`.
+
+### Source dimension после Telegram bot / API-client
+
+Пока `source` не добавлялся в базовую метрику, потому что сейчас почти все заявки приходят из `web`. После появления Telegram bot или отдельного API-клиента добавить source dimension:
 
 ```text
-category=newlms-misis resource=schedule >= 3 open tickets
-→ Possible newlms.misis.ru schedule incident
-
-category=gornyak-misis resource=plumber-request >= 3 open tickets
-→ Possible gornyak.misis.ru service request issue
-
-priority=critical status=open > 0 for 5m
-→ Critical student support ticket is open
+source=web
+source=telegram
+source=api
 ```
+
+Возможная метрика:
+
+```text
+supportdesk_tickets_current_by_source{status,category,resource,priority,source}
+```
+
+Возможные вопросы:
+
+```text
+Сколько active-заявок пришло из web?
+Сколько active-заявок пришло из Telegram?
+Есть ли critical-заявки из Telegram?
+```
+
+### Event-based counters после PostgreSQL / ticket_events
+
+Не добавлять честные counters поверх одного только `tickets.json`: при reopen и отсутствии event history они будут неоднозначны.
+
+После появления PostgreSQL и таблицы `ticket_events` добавить:
+
+```text
+supportdesk_tickets_created_total{category,resource,priority,source}
+supportdesk_tickets_resolved_total{category,resource,priority,source}
+```
+
+Возможные alerts:
+
+```text
+SupportDeskTicketSpike
+SupportDeskCreatedOutpacesResolved
+SupportDeskNoResolutionsForActiveBacklog
+```
+
+### Duration/SLA metrics после полноценной event observability
+
+После event storage можно корректно считать время от создания до закрытия:
+
+```text
+supportdesk_ticket_resolution_duration_seconds_bucket{category,resource,priority,source,le}
+supportdesk_ticket_resolution_duration_seconds_sum{category,resource,priority,source}
+supportdesk_ticket_resolution_duration_seconds_count{category,resource,priority,source}
+```
+
+Возможные alerts:
+
+```text
+SupportDeskSlowResolution
+SupportDeskSlaViolationRisk
+```
+
+Причина отложить: на этапе 13 уже добавлена простая и полезная метрика возраста active-заявки `supportdesk_active_ticket_age_seconds_max`; полноценная SLA-аналитика требует event-based storage.
 
 ## Logging improvements
 
@@ -163,6 +192,8 @@ Promtail продолжает читать /var/log/app/app.log через volum
 
 Текущий storage: `/opt/app/tickets.json`.
 
+PostgreSQL нужен не только как более надежное хранилище заявок, но и как основа для будущих event-based counters и SLA/duration metrics.
+
 Будущая таблица `tickets`:
 
 ```text
@@ -181,7 +212,7 @@ updated_at
 resolved_at
 ```
 
-Возможная таблица `ticket_events`:
+Рекомендуемая таблица `ticket_events` для counters, duration metrics и audit trail:
 
 ```text
 id
@@ -212,7 +243,7 @@ restore test
 
 ## Telegram support bot
 
-Будущий второй клиент к тому же API v1.
+Будущий второй клиент к тому же API v1. После его появления появится практический смысл добавлять `source` в product metrics.
 
 Команды:
 
@@ -229,6 +260,7 @@ restore test
 создавать заявки через app API v1
 писать source=telegram
 использовать те же category/resource values
+после стабилизации добавить source dimension в product metrics
 bot token хранить вне Git
 bot logs отправлять в Loki
 ```

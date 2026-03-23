@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "Product model v2 completed. The product is now MISIS_Digital Student Support: a student-facing support portal for university digital services. Browser -> web/Nginx -> app/v1 API works; tickets use category/resource model; active/resolved/history flow works; app logs contain category/resource; Promtail adds category as a Loki label; Grafana dashboard app logs and product metrics are updated; admin remains an Ansible control node.",
-  "last_completed_stage": "Product model v2: MISIS_Digital Student Support, category/resource model, API v1, active/resolved tickets, frontend category->resource dropdown, Promtail category label, Grafana App logs update",
-  "current_next_stage": "Product observability v2: metrics and alerts by category/resource/priority/source",
+  "status": "Product observability v2 completed. MISIS_Digital Student Support now has product metrics by status/category/resource/priority, active ticket age metric, Grafana Product Observability v2 panels, cleaned alert rules, and improved Ansible Prometheus rules deploy readiness check.",
+  "last_completed_stage": "Product observability v2: supportdesk_tickets_current, supportdesk_active_ticket_age_seconds_max, Grafana panels, SupportDeskTooManyTicketsForResource, SupportDeskCriticalTicketsOpen, SupportDeskOldCriticalTicket, alert cleanup",
+  "current_next_stage": "HTTP/request observability: request metrics, errors, status codes, latency and error-rate alerts",
   "servers": {
     "admin": "192.168.85.129",
     "web": "192.168.85.131",
@@ -24,7 +24,16 @@
       "pay-misis"
     ],
     "storage": "/opt/app/tickets.json",
-    "api_prefix": "/v1"
+    "api_prefix": "/v1",
+    "metrics": [
+      "supportdesk_tickets_total",
+      "supportdesk_tickets_open",
+      "supportdesk_tickets_in_progress",
+      "supportdesk_tickets_resolved",
+      "supportdesk_tickets_active",
+      "supportdesk_tickets_current{status,category,resource,priority}",
+      "supportdesk_active_ticket_age_seconds_max{category,resource,priority}"
+    ]
   },
   "sources": [
     "00_project_overview_and_roadmap.md",
