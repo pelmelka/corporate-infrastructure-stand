@@ -170,15 +170,39 @@
 - [ ] `supportdesk_ticket_resolution_duration_seconds_*` после полноценной event/SLA observability.
 - [ ] Alerts `SupportDeskTicketSpike`, `SupportDeskCreatedOutpacesResolved`, `SupportDeskSlowResolution`, `SupportDeskNoResolutionsForActiveBacklog` после counters/duration metrics.
 
-## Текущий следующий этап: HTTP/request observability
+## Завершено: HTTP/request observability
 
+- [x] Перед изменениями созданы backup-и `/opt/app/app.py.bak-before-http-observability-v1` и `/opt/app/tickets.json.bak-before-http-observability-v1`.
+- [x] Проверено, что `prometheus_client` установлен на `app`.
+- [x] В `app.py` добавлен `CollectorRegistry` для HTTP metrics.
+- [x] Добавлен counter `supportdesk_http_requests_total{method,route,status_code}`.
+- [x] Добавлен histogram `supportdesk_http_request_duration_seconds{method,route,status_code}`.
+- [x] На `/metrics` появились `supportdesk_http_request_duration_seconds_bucket/sum/count`.
+- [x] `/metrics` исключен из пользовательских HTTP request metrics.
+- [x] Реализована route normalization: `/v1/tickets/<id>` и `/v1/tickets/<id>/status` не создают high-cardinality labels.
+- [x] Проверено, что 404 дает `route="unmatched"`, `status_code="404"`.
+- [x] Prometheus видит `supportdesk_http_requests_total{job="supportdesk-api"}`.
+- [x] Prometheus видит `supportdesk_http_request_duration_seconds_count{job="supportdesk-api"}`.
+- [x] Проверены PromQL-запросы по status code, error count и p95 latency.
+- [x] В Prometheus rules добавлены `SupportDeskHigh4xxRate`, `SupportDeskHigh5xxRate`, `SupportDeskHighLatency`.
+- [x] `SupportDeskHigh4xxRate` протестирован генерацией 4xx-трафика и перешел в `FIRING`.
+- [x] На `web` Promtail config дополнен metrics pipeline для nginx access log.
+- [x] Исправлен неудачный длинный regex: финальный pipeline использует минимальный regex для извлечения `status_code`.
+- [x] Promtail на `web` после правки снова `active (running)`.
+- [x] На `web:9080/metrics` появилась custom metric `promtail_custom_nginx_http_responses_total{status_code}`.
+- [x] В Prometheus config добавлен target `promtail-web` на `192.168.85.131:9080`.
+- [x] Prometheus показывает `promtail-web (1/1 up)`.
+- [x] В Prometheus rules добавлен `Nginx502Spike`.
+- [x] `Nginx502Spike` протестирован остановкой `app.service` и запросами через `web/Nginx`; alert перешел в `FIRING`.
+- [x] После теста `app.service` восстановлен.
+- [x] В Grafana dashboard добавлен минимальный блок `HTTP/API Observability` из 4 panels:
+  - [x] `HTTP/API Health Overview`;
+  - [x] `API Request Rate by Route`;
+  - [x] `API Responses by Status Code`;
+  - [x] `API p95 Latency by Route`.
+- [x] Дублирующая метрика `supportdesk_errors_total` сознательно не добавлялась: ошибки считаются через `status_code` в `supportdesk_http_requests_total`.
 
-- [ ] Перейти на Prometheus client library или аккуратно расширить ручной `/metrics`.
-- [ ] Добавить `supportdesk_requests_total{method,path,status}`.
-- [ ] Добавить `supportdesk_errors_total{status}`.
-- [ ] Добавить `supportdesk_request_duration_seconds`.
-- [ ] Добавить HTTP status / error-rate alerts.
-- [ ] Не смешивать этот этап с event/SLA metrics заявок: `created_total`, `resolved_total` и `resolution_duration` оставить до PostgreSQL / `ticket_events`.
+## Текущий следующий этап: Dockerization
 
 ## Далее: Dockerization
 

@@ -10,7 +10,7 @@
 - обрабатывать API продукта `MISIS_Digital Student Support`;
 - хранить заявки в lab storage `/opt/app/tickets.json`;
 - писать product logs в `/var/log/app/app.log`;
-- отдавать product metrics на `/metrics`;
+- отдавать product metrics и HTTP/API request metrics на `/metrics`;
 - работать как `systemd` service;
 - отправлять app logs в Loki через Promtail;
 - отдавать системные метрики через node_exporter.
@@ -42,9 +42,11 @@
 /opt/app/app.py.bak-before-logging-polish
 /opt/app/app.py.bak-before-product-model-v2
 /opt/app/app.py.bak-before-product-observability-v2
+/opt/app/app.py.bak-before-http-observability-v1
 /opt/app/tickets.json
 /opt/app/tickets.json.bak-before-product-model-v2-...
 /opt/app/tickets.json.bak-before-product-observability-v2
+/opt/app/tickets.json.bak-before-http-observability-v1
 ```
 
 Старые заявки из Mini Support Desk v1 сохранены в backup `tickets.json.bak-before-product-model-v2-*`. Рабочий `/opt/app/tickets.json` очищен и используется только под новую модель v2. Категория `legacy` сознательно не используется.
@@ -62,7 +64,7 @@
 - возвращает API-ответы в JSON;
 - хранит заявки в `/opt/app/tickets.json`;
 - пишет product logs в `/var/log/app/app.log`;
-- отдает product metrics на `/metrics` в Prometheus text format;
+- отдает product metrics и HTTP/API request metrics на `/metrics` в Prometheus text format;
 - поддерживает legacy endpoints и новые `/v1/*` endpoints.
 
 Product model v2:
@@ -259,11 +261,31 @@ supportdesk_tickets_current{status,category,resource,priority}
 supportdesk_active_ticket_age_seconds_max{category,resource,priority}
 ```
 
+HTTP/API request observability metrics:
+
+```text
+supportdesk_http_requests_total{method,route,status_code}
+supportdesk_http_request_duration_seconds_bucket{method,route,status_code,le}
+supportdesk_http_request_duration_seconds_sum{method,route,status_code}
+supportdesk_http_request_duration_seconds_count{method,route,status_code}
+```
+
+HTTP metrics реализованы через `prometheus_client` с отдельным `CollectorRegistry`, чтобы не засорять `/metrics` лишними runtime/process metrics. Старые product metrics остались ручными и совместимыми с существующими panels/alerts.
+
+Принципы:
+
+```text
+/metrics не учитывается как пользовательский API request;
+route label нормализуется: /v1/tickets/123/status -> /v1/tickets/{id}/status;
+raw ticket_id и query string не попадают в labels;
+ошибки считаются через status_code, отдельный supportdesk_errors_total не добавлялся как дублирующий.
+```
+
 `supportdesk_tickets_current` показывает текущее распределение заявок по статусу, цифровому сервису, ресурсу и приоритету.
 
 `supportdesk_active_ticket_age_seconds_max` считает максимальный возраст активной заявки (`open` или `in_progress`) по `category/resource/priority`. Значение считается как `now - created_at`, поэтому для незакрытой заявки оно растет от scrape к scrape.
 
-Prometheus на `monitor` собирает эти метрики отдельным scrape job:
+Prometheus на `monitor` собирает product и HTTP/API metrics отдельным scrape job:
 
 ```text
 job="supportdesk-api"
@@ -308,9 +330,11 @@ curl -s http://localhost:8080/metrics
 - `/v1/health` возвращает `MISIS_Digital Student Support` JSON;
 - `/v1/support-model` возвращает список цифровых сервисов и ресурсов;
 - `/v1/tickets` возвращает active tickets;
-- `/metrics` возвращает product metrics, включая Product observability v2 metrics;
+- `/metrics` возвращает product metrics, Product observability v2 metrics и HTTP/API request metrics;
 - неверная пара `category/resource` возвращает validation error;
-- при остановке `app.service` alert `SupportDeskApiDown` переходит в `FIRING`.
+- при остановке `app.service` alert `SupportDeskApiDown` переходит в `FIRING`;
+- при генерации 4xx-трафика alert `SupportDeskHigh4xxRate` переходит в `FIRING`;
+- p95 latency считается через histogram `supportdesk_http_request_duration_seconds_*`.
 
 ## Promtail
 
@@ -377,4 +401,5 @@ category=<category из app log line>
 - Loki category label работает;
 - product metrics доступны на `/metrics` и собираются Prometheus;
 - Product observability v2 metrics `supportdesk_tickets_current` и `supportdesk_active_ticket_age_seconds_max` работают и видны в Prometheus/Grafana;
+- HTTP request counter и latency histogram работают, видны в Prometheus и используются в Grafana/alerts;
 - системные метрики доступны Prometheus через node_exporter.

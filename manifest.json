@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "Product observability v2 completed. MISIS_Digital Student Support now has product metrics by status/category/resource/priority, active ticket age metric, Grafana Product Observability v2 panels, cleaned alert rules, and improved Ansible Prometheus rules deploy readiness check.",
-  "last_completed_stage": "Product observability v2: supportdesk_tickets_current, supportdesk_active_ticket_age_seconds_max, Grafana panels, SupportDeskTooManyTicketsForResource, SupportDeskCriticalTicketsOpen, SupportDeskOldCriticalTicket, alert cleanup",
-  "current_next_stage": "HTTP/request observability: request metrics, errors, status codes, latency and error-rate alerts",
+  "status": "HTTP/API observability completed. MISIS_Digital Student Support now has app-level HTTP request metrics, latency histogram, error-rate alerts, Promtail nginx 502 metric, promtail-web scrape target, Nginx502Spike and compact Grafana HTTP/API panels.",
+  "last_completed_stage": "HTTP/API observability: supportdesk_http_requests_total, supportdesk_http_request_duration_seconds histogram, SupportDeskHigh4xxRate, SupportDeskHigh5xxRate, SupportDeskHighLatency, promtail_custom_nginx_http_responses_total, Nginx502Spike, Grafana HTTP/API Observability panels",
+  "current_next_stage": "Dockerization: containerize misis-digital-student-support-api while preserving external port 8080, logs volume and current Nginx/Prometheus/Promtail flow",
   "servers": {
     "admin": "192.168.85.129",
     "web": "192.168.85.131",
@@ -32,7 +32,12 @@
       "supportdesk_tickets_resolved",
       "supportdesk_tickets_active",
       "supportdesk_tickets_current{status,category,resource,priority}",
-      "supportdesk_active_ticket_age_seconds_max{category,resource,priority}"
+      "supportdesk_active_ticket_age_seconds_max{category,resource,priority}",
+      "supportdesk_http_requests_total{method,route,status_code}",
+      "supportdesk_http_request_duration_seconds_bucket{method,route,status_code,le}",
+      "supportdesk_http_request_duration_seconds_sum{method,route,status_code}",
+      "supportdesk_http_request_duration_seconds_count{method,route,status_code}",
+      "promtail_custom_nginx_http_responses_total{status_code}"
     ]
   },
   "sources": [

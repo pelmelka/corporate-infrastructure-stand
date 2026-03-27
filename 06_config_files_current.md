@@ -307,6 +307,19 @@ clients:
 
 scrape_configs:
   - job_name: nginx
+    pipeline_stages:
+      - regex:
+          expression: '^.*" (?P<status_code>[0-9]{3}) .*$'
+      - labels:
+          status_code:
+      - metrics:
+          nginx_http_responses_total:
+            type: Counter
+            description: "Total nginx HTTP responses by status code"
+            source: status_code
+            config:
+              action: inc
+
     static_configs:
       - targets:
           - localhost
@@ -317,6 +330,13 @@ scrape_configs:
           env: lab
           __path__: /var/log/nginx/*.log
 ```
+
+Особенности:
+
+- Promtail продолжает отправлять nginx logs в Loki;
+- `regex` извлекает `status_code` из nginx access log;
+- `metrics` stage создает counter `promtail_custom_nginx_http_responses_total{status_code}` на `web:9080/metrics`;
+- метрика используется Prometheus job `promtail-web` и alert-ом `Nginx502Spike`.
 
 ## Promtail config для app
 
@@ -411,9 +431,18 @@ scrape_configs:
           host: app
           service: support-desk-api
           env: lab
+
+  - job_name: promtail-web
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['192.168.85.131:9080']
+        labels:
+          host: web
+          service: promtail
+          env: lab
 ```
 
-Примечание: Prometheus job/label `supportdesk-api` пока сохранен для совместимости с существующими panels и alerts, хотя приложение теперь называется `misis-digital-student-support-api`.
+Примечание: Prometheus job/label `supportdesk-api` пока сохранен для совместимости с существующими panels и alerts, хотя приложение теперь называется `misis-digital-student-support-api`. Job `promtail-web` добавлен для custom metrics Promtail на `web:9080`, прежде всего для nginx status code metric и `Nginx502Spike`.
 
 ## Prometheus alert rules
 
@@ -469,6 +498,69 @@ groups:
           summary: "Old critical support ticket for {{ $labels.category }} / {{ $labels.resource }}"
           description: "The oldest active critical ticket for {{ $labels.category }} / {{ $labels.resource }} is {{ $value }} seconds old."
 
+      - alert: SupportDeskHigh4xxRate
+        expr: |
+          (
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api",status_code=~"4.."}[5m]))
+            /
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m]))
+          ) > 0.30
+          and
+          sum(increase(supportdesk_http_requests_total{job="supportdesk-api"}[5m])) >= 5
+        for: 2m
+        labels:
+          severity: warning
+          service: misis-digital-student-support-api
+        annotations:
+          summary: "High 4xx rate for MISIS_Digital Student Support API"
+          description: "More than 30% of recent API requests returned 4xx responses. This usually means many invalid client/UI/API requests."
+
+      - alert: SupportDeskHigh5xxRate
+        expr: |
+          (
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api",status_code=~"5.."}[5m]))
+            /
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m]))
+          ) > 0.05
+          and
+          sum(increase(supportdesk_http_requests_total{job="supportdesk-api"}[5m])) >= 5
+        for: 1m
+        labels:
+          severity: critical
+          service: misis-digital-student-support-api
+        annotations:
+          summary: "High 5xx rate for MISIS_Digital Student Support API"
+          description: "More than 5% of recent API requests returned 5xx responses. This usually means backend-side errors."
+
+      - alert: SupportDeskHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by(le) (
+              rate(supportdesk_http_request_duration_seconds_bucket{job="supportdesk-api"}[5m])
+            )
+          ) > 0.5
+          and
+          sum(increase(supportdesk_http_requests_total{job="supportdesk-api"}[5m])) >= 5
+        for: 2m
+        labels:
+          severity: warning
+          service: misis-digital-student-support-api
+        annotations:
+          summary: "High latency for MISIS_Digital Student Support API"
+          description: "p95 API latency is above 0.5 seconds for more than 2 minutes."
+
+      - alert: Nginx502Spike
+        expr: |
+          sum(increase(promtail_custom_nginx_http_responses_total{job="promtail-web",host="web",status_code="502"}[5m])) >= 3
+        for: 30s
+        labels:
+          severity: critical
+          service: frontend
+        annotations:
+          summary: "Nginx is returning 502 responses"
+          description: "Nginx on web returned {{ $value }} HTTP 502 responses in the last 5 minutes. This usually means the backend app is unavailable or reverse proxy upstream is broken."
+
       - alert: HighDiskUsage
         expr: 100 * (1 - (node_filesystem_avail_bytes{job="node", mountpoint="/", fstype="ext4"} / node_filesystem_size_bytes{job="node", mountpoint="/", fstype="ext4"})) > 80
         for: 2m
@@ -490,7 +582,7 @@ groups:
           description: "Prometheus cannot scrape node_exporter on {{ $labels.host }} at {{ $labels.instance }} for more than 30 seconds."
 ```
 
-Проверено после Product observability v2:
+Проверено после HTTP/API observability:
 
 - `SupportDeskApiDown` остается для API availability;
 - `SupportDeskTooManyTicketsForResource` срабатывает при концентрации active-заявок на одном `category/resource`;
@@ -498,6 +590,9 @@ groups:
 - `SupportDeskOldCriticalTicket` срабатывает при active critical-заявке старше 600 секунд;
 - `HighDiskUsage` проверен временным порогом `>20`, затем возвращен на `>80`;
 - `NodeTargetDown` срабатывает при остановке node_exporter на target node;
+- `SupportDeskHigh4xxRate` срабатывает при генерации 4xx-трафика;
+- `Nginx502Spike` срабатывает при остановке `app.service` и запросах через `web/Nginx`;
+- `SupportDeskApiDown` при этом также срабатывает, потому что Prometheus теряет `supportdesk-api` target;
 - старый `TooManyOpenTickets` удален как менее точный общий product alert.
 
 ## Alertmanager
@@ -587,6 +682,102 @@ Active Alerts panel:
 ```promql
 sum(ALERTS{alertstate="firing"}) or vector(0)
 ```
+
+
+HTTP/API Observability panels:
+
+`HTTP/API Health Overview` — Stat panel, all queries Instant:
+
+```promql
+100 *
+(
+  sum(rate(supportdesk_http_requests_total{job="supportdesk-api",status_code=~"4.."}[5m]))
+  or vector(0)
+)
+/
+clamp_min(
+  sum(rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m])),
+  0.001
+)
+```
+
+```promql
+100 *
+(
+  sum(rate(supportdesk_http_requests_total{job="supportdesk-api",status_code=~"5.."}[5m]))
+  or vector(0)
+)
+/
+clamp_min(
+  sum(rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m])),
+  0.001
+)
+```
+
+```promql
+(
+  1000 *
+  histogram_quantile(
+    0.95,
+    sum by(le) (
+      rate(supportdesk_http_request_duration_seconds_bucket{job="supportdesk-api"}[15m])
+    )
+  )
+)
+unless on()
+(
+  sum(rate(supportdesk_http_request_duration_seconds_count{job="supportdesk-api"}[15m])) == 0
+)
+or vector(0)
+```
+
+```promql
+sum(
+  increase(promtail_custom_nginx_http_responses_total{job="promtail-web",host="web",status_code="502"}[5m])
+)
+or vector(0)
+```
+
+```promql
+sum(
+  ALERTS{alertname=~"SupportDeskHigh4xxRate|SupportDeskHigh5xxRate|SupportDeskHighLatency|Nginx502Spike",alertstate="firing"}
+)
+or vector(0)
+```
+
+`API Request Rate by Route`:
+
+```promql
+sum by(method, route) (
+  rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m])
+)
+```
+
+`API Responses by Status Code`:
+
+```promql
+sum by(status_code) (
+  rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m])
+)
+```
+
+`API p95 Latency by Route` — Bar gauge:
+
+```promql
+topk(
+  8,
+  1000 *
+  histogram_quantile(
+    0.95,
+    sum by(le, route) (
+      rate(supportdesk_http_request_duration_seconds_bucket{job="supportdesk-api"}[15m])
+    )
+  )
+)
+```
+
+Решение по dashboard: отдельная подробная панель Nginx responses by status code не добавлялась, чтобы сохранить минимальный набор из 4 panels; proxy-level 502 уже виден в `HTTP/API Health Overview`.
+
 
 App logs panel query:
 
@@ -1188,6 +1379,8 @@ Backup-и:
 app: /opt/app/app.py.bak-before-supportdesk
 app: /opt/app/app.py.bak-before-logging-polish
 app: /opt/app/app.py.bak-before-product-model-v2
+app: /opt/app/app.py.bak-before-product-observability-v2
+app: /opt/app/app.py.bak-before-http-observability-v1
 ```
 
 Данные:
@@ -1200,6 +1393,8 @@ Backup старых заявок:
 
 ```text
 app: /opt/app/tickets.json.bak-before-product-model-v2-...
+app: /opt/app/tickets.json.bak-before-product-observability-v2
+app: /opt/app/tickets.json.bak-before-http-observability-v1
 ```
 
 Endpoints:
@@ -1233,6 +1428,15 @@ supportdesk_tickets_current{status,category,resource,priority}
 supportdesk_active_ticket_age_seconds_max{category,resource,priority}
 ```
 
+HTTP/API metrics:
+
+```text
+supportdesk_http_requests_total{method,route,status_code}
+supportdesk_http_request_duration_seconds_bucket{method,route,status_code,le}
+supportdesk_http_request_duration_seconds_sum{method,route,status_code}
+supportdesk_http_request_duration_seconds_count{method,route,status_code}
+```
+
 ### Полный текущий код `/opt/app/app.py`
 
 ```python
@@ -1243,6 +1447,15 @@ import json
 import logging
 import os
 import re
+import time
+
+from prometheus_client import Counter, Histogram, CollectorRegistry, generate_latest
+
+try:
+    from prometheus_client import disable_created_metrics
+    disable_created_metrics()
+except ImportError:
+    pass
 
 HOST = "0.0.0.0"
 PORT = 8080
@@ -1401,6 +1614,24 @@ logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s %(levelname)s service=misis-digital-student-support-api %(message)s",
+)
+
+
+HTTP_METRICS_REGISTRY = CollectorRegistry()
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "supportdesk_http_requests_total",
+    "Total HTTP requests handled by MISIS Digital Student Support API",
+    ["method", "route", "status_code"],
+    registry=HTTP_METRICS_REGISTRY,
+)
+
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "supportdesk_http_request_duration_seconds",
+    "HTTP request duration in seconds for MISIS Digital Student Support API",
+    ["method", "route", "status_code"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+    registry=HTTP_METRICS_REGISTRY,
 )
 
 
@@ -1656,7 +1887,85 @@ def api_version(path):
     return "legacy"
 
 
+def metrics_route(raw_path):
+    try:
+        path = normalize_path(urlparse(raw_path).path)
+    except Exception:
+        return "unmatched"
+
+    exact_routes = {
+        "/health",
+        "/v1/health",
+        "/support-model",
+        "/v1/support-model",
+        "/model",
+        "/v1/model",
+        "/tickets",
+        "/v1/tickets",
+        "/tickets/all",
+        "/v1/tickets/all",
+        "/metrics",
+    }
+
+    if path in exact_routes:
+        return path
+
+    if re.fullmatch(r"/tickets/\d+", path):
+        return "/tickets/{id}"
+
+    if re.fullmatch(r"/v1/tickets/\d+", path):
+        return "/v1/tickets/{id}"
+
+    if re.fullmatch(r"/tickets/\d+/status", path):
+        return "/tickets/{id}/status"
+
+    if re.fullmatch(r"/v1/tickets/\d+/status", path):
+        return "/v1/tickets/{id}/status"
+
+    return "unmatched"
+
+
 class SupportDeskHandler(BaseHTTPRequestHandler):
+    def handle_one_request(self):
+        self._request_started_at = time.monotonic()
+        self._response_status_code = 0
+
+        try:
+            super().handle_one_request()
+        finally:
+            raw_path = getattr(self, "path", "")
+            method = getattr(self, "command", "UNKNOWN")
+
+            if not raw_path:
+                return
+
+            route = metrics_route(raw_path)
+
+            if route == "/metrics":
+                return
+
+            status_code = str(getattr(self, "_response_status_code", 0) or 0)
+            duration = time.monotonic() - self._request_started_at
+
+            try:
+                HTTP_REQUESTS_TOTAL.labels(
+                    method=method,
+                    route=route,
+                    status_code=status_code,
+                ).inc()
+
+                HTTP_REQUEST_DURATION_SECONDS.labels(
+                    method=method,
+                    route=route,
+                    status_code=status_code,
+                ).observe(duration)
+            except Exception:
+                pass
+
+    def send_response(self, code, message=None):
+        self._response_status_code = int(code)
+        super().send_response(code, message)
+
     def send_json(self, status_code, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
@@ -1902,7 +2211,9 @@ class SupportDeskHandler(BaseHTTPRequestHandler):
                     lines.append(f"supportdesk_active_ticket_age_seconds_max{{{labels}}} {age}")
 
                 lines.append("")
-                body = "\n".join(lines).encode("utf-8")
+                product_metrics_body = "\n".join(lines).encode("utf-8")
+                http_metrics_body = generate_latest(HTTP_METRICS_REGISTRY)
+                body = product_metrics_body + http_metrics_body
 
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
