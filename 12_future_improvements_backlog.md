@@ -137,17 +137,17 @@ Ticket change events  -> только ticket_created/ticket_status_changed/ticke
 
 ## HTTP/request observability
 
-Добавить request-level метрики API:
+Этап 14 завершен в минимальном production-like scope.
+
+Реализовано:
 
 ```text
-supportdesk_requests_total{method,path,status}
-supportdesk_errors_total{status}
-supportdesk_request_duration_seconds_bucket
-supportdesk_request_duration_seconds_sum
-supportdesk_request_duration_seconds_count
+supportdesk_http_requests_total{method,route,status_code}
+supportdesk_http_request_duration_seconds_bucket/sum/count{method,route,status_code}
+promtail_custom_nginx_http_responses_total{status_code}
 ```
 
-Возможные alerts:
+Реализованные alerts:
 
 ```text
 SupportDeskHigh5xxRate
@@ -156,7 +156,33 @@ SupportDeskHighLatency
 Nginx502Spike
 ```
 
-Желательно перейти с ручного `/metrics` на Prometheus client library.
+Реализованные Grafana panels:
+
+```text
+HTTP/API Health Overview
+API Request Rate by Route
+API Responses by Status Code
+API p95 Latency by Route
+```
+
+Сознательно не добавлялось:
+
+```text
+supportdesk_errors_total
+supportdesk_4xx_total
+supportdesk_5xx_total
+```
+
+Причина: эти сигналы уже считаются через `supportdesk_http_requests_total{status_code=...}`, а дублирующие counters усложняют dashboard и alerts.
+
+Возможные будущие улучшения HTTP/API observability:
+
+```text
+экспортировать Grafana dashboard JSON в Git;
+добавить отдельную Nginx Responses by Status Code panel, если понадобится подробный reverse proxy traffic view;
+после Docker/DB проверить latency thresholds на более реалистичной нагрузке;
+после появления DB добавить latency breakdown для DB-зависимых endpoints.
+```
 
 ## Dockerization
 
