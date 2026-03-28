@@ -428,6 +428,101 @@ restart_app.yml перезапускает app.service и проверяет /he
 
 Смысл демонстрации: инфраструктура уже частично управляется как code — через Git-tracked Ansible inventory/playbook'и на `admin`, а не только ручными командами на каждом сервере.
 
+
+## Сценарий 15a. HTTP/API observability
+
+Цель: показать, что проект мониторит не только наличие backend-а, но и качество HTTP/API-слоя.
+
+Шаги:
+
+1. Сгенерировать нормальный и ошибочный трафик:
+
+```bash
+for i in {1..20}; do
+  curl -s -o /dev/null http://192.168.85.131/api/v1/health
+  curl -s -o /dev/null http://192.168.85.131/api/v1/tickets
+  curl -s -o /dev/null http://192.168.85.131/api/bad-endpoint
+done
+```
+
+2. Проверить Prometheus query:
+
+```promql
+sum by(method, route) (
+  rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m])
+)
+```
+
+3. Проверить status code query:
+
+```promql
+sum by(status_code) (
+  rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m])
+)
+```
+
+4. Проверить p95 latency:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by(le) (
+    rate(supportdesk_http_request_duration_seconds_bucket{job="supportdesk-api"}[5m])
+  )
+)
+```
+
+5. Открыть Grafana dashboard `Infrastructure Overview`, блок `HTTP/API Observability`.
+
+Ожидаемый итог:
+
+```text
+HTTP/API Health Overview показывает 4xx rate, 5xx rate, p95 latency, Nginx 502 / 5m и HTTP alerts firing.
+API Request Rate by Route показывает GET /v1/health, GET /v1/tickets и GET unmatched.
+API Responses by Status Code показывает HTTP 200 и HTTP 404.
+API p95 Latency by Route показывает p95 latency по routes в milliseconds.
+```
+
+## Сценарий 15b. Nginx502Spike proxy-level alert
+
+Цель: показать разницу между backend scrape failure и пользовательской ошибкой reverse proxy.
+
+Шаги:
+
+```bash
+# app
+sudo systemctl stop app.service
+
+# admin/web
+for i in {1..5}; do
+  curl -s -o /dev/null http://192.168.85.131/api/v1/health
+done
+```
+
+Проверить Prometheus Alerts:
+
+```text
+SupportDeskApiDown -> FIRING
+Nginx502Spike -> FIRING
+```
+
+Смысл:
+
+```text
+SupportDeskApiDown = Prometheus не может scrape-ить app:8080/metrics.
+Nginx502Spike = пользовательский путь Browser -> web/Nginx -> app сломан, Nginx возвращает 502.
+```
+
+Восстановление:
+
+```bash
+# app
+sudo systemctl start app.service
+systemctl status app.service --no-pager
+```
+
+Ожидаемый итог: после восстановления backend-а и выхода 502 из окна `[5m]` оба alert-а гаснут.
+
 ## Сценарий 16. Future Dockerized app
 
 Цель: будущая демонстрация Docker как способа доставки backend-а.

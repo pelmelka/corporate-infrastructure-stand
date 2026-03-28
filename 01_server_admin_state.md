@@ -202,6 +202,20 @@ deploy_prometheus_rules.yml   деплой Prometheus alert rules + promtool val
 
 `restart_app.yml` и `deploy_prometheus_rules.yml` используют `become: true` и `vars_prompt` для ввода `ansible_become_password`, чтобы не хранить sudo-пароль в файлах проекта.
 
+После этапа HTTP/API observability локальный source-файл Prometheus rules дополнен новыми alert-ами:
+
+```text
+SupportDeskHigh4xxRate
+SupportDeskHigh5xxRate
+SupportDeskHighLatency
+Nginx502Spike
+```
+
+`deploy_prometheus_rules.yml` успешно задеплоил обновленные rules на `monitor` после исправления YAML-отступа у `Nginx502Spike`. Валидация `promtool check rules` защитила `monitor` от деплоя битого YAML при первой неудачной попытке.
+
+Примечание: commit этих изменений в Git в чате не подтвержден. Перед следующим этапом стоит выполнить `git status`, затем `git add files/prometheus/supportdesk.rules.yml` и commit для фиксации этапа 14.
+
+
 ## Структура проекта
 
 Создана структура:
@@ -282,4 +296,4 @@ nothing to commit, working tree clean
 - первые operational playbook'и;
 - Git repo с первыми commit'ами.
 
-Последний завершенный этап проекта: `Product observability v2` — category/resource/priority metrics, Grafana panels, product alerts and Prometheus rules cleanup.
+Последний завершенный этап проекта: `HTTP/API observability` — app HTTP request metrics, latency histogram, 4xx/5xx/latency alerts, Promtail nginx 502 metric and `Nginx502Spike`.
