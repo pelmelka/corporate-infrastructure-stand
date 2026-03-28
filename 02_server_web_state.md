@@ -11,6 +11,7 @@
 - проксировать `/api/*` на `app:8080`;
 - писать nginx access/error logs;
 - отправлять nginx logs в Loki через Promtail;
+- экспортировать nginx-derived HTTP response metrics через Promtail `:9080/metrics`;
 - отдавать системные метрики через node_exporter.
 
 ## Основная информация
@@ -22,7 +23,7 @@
 - User: `pelmel`
 - SSH/sudo: работают
 - Nginx: `active/enabled`
-- Promtail: `active/enabled`
+- Promtail: `active/enabled`; после настройки nginx HTTP metrics pipeline снова `active (running)`
 - node_exporter: `active/enabled`
 
 ## Nginx
@@ -182,6 +183,28 @@ service=frontend
 env=lab
 ```
 
+Дополнительно Promtail на `web` теперь строит custom metric из nginx access log:
+
+```text
+promtail_custom_nginx_http_responses_total{status_code}
+```
+
+Реализация:
+
+```text
+nginx access.log -> Promtail regex pipeline -> status_code label -> metrics stage Counter -> web:9080/metrics
+```
+
+Эта метрика используется Prometheus job `promtail-web` и alert-ом `Nginx502Spike`. Проверено, что в Prometheus видны статусы nginx, например `status_code="200"`, `status_code="304"`, а при остановке backend-а появляется `status_code="502"`.
+
+Backup перед изменением Promtail config:
+
+```text
+/etc/promtail/config.yml.bak-before-nginx-http-metrics
+```
+
+Во время настройки длинный regex был заменен на минимальный устойчивый вариант для извлечения HTTP status code, потому что первый вариант был слишком сильно заэкранирован и приводил к падению `promtail.service` с ошибкой regexp.
+
 ## Proxy headers
 
 Nginx передает в backend:
@@ -223,4 +246,5 @@ prometheus-node-exporter.service
 - `/api/*` проксируется на `app:8080`;
 - Browser -> web -> app/v1 flow подтвержден;
 - nginx logs уходят в Loki;
+- nginx-derived HTTP response metric `promtail_custom_nginx_http_responses_total` доступна на `:9080/metrics` и собирается Prometheus через `promtail-web`;
 - системные метрики доступны Prometheus через node_exporter.
