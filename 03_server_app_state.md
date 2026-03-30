@@ -6,12 +6,12 @@
 
 Роль:
 
-- запускать Python backend `misis-digital-student-support-api`;
+- запускать Dockerized Python backend `misis-digital-student-support-api`;
 - обрабатывать API продукта `MISIS_Digital Student Support`;
 - хранить заявки в lab storage `/opt/app/tickets.json`;
 - писать product logs в `/var/log/app/app.log`;
 - отдавать product metrics и HTTP/API request metrics на `/metrics`;
-- работать как `systemd` service;
+- работать как Docker container через `docker compose`;
 - отправлять app logs в Loki через Promtail;
 - отдавать системные метрики через node_exporter.
 
@@ -23,7 +23,9 @@
 - Interface: `ens18`
 - User: `pelmel`
 - SSH/sudo: работают
-- App service: `active/enabled`
+- App runtime: Docker container `misis-digital-student-support-api` `Up` через `docker compose`
+- Legacy app.service: `inactive/dead`, `disabled`, сохранен как rollback-вариант
+- Docker Engine: `active/enabled`
 - Promtail: `active/enabled`
 - node_exporter: `active/enabled`
 
@@ -37,21 +39,24 @@
 
 ```text
 /opt/app/app.py
-/opt/app/app.py.bak-before-supportdesk
-/opt/app/app.py.bak-before-logging
-/opt/app/app.py.bak-before-logging-polish
-/opt/app/app.py.bak-before-product-model-v2
-/opt/app/app.py.bak-before-product-observability-v2
-/opt/app/app.py.bak-before-http-observability-v1
 /opt/app/tickets.json
-/opt/app/tickets.json.bak-before-product-model-v2-...
-/opt/app/tickets.json.bak-before-product-observability-v2
-/opt/app/tickets.json.bak-before-http-observability-v1
+/opt/app/Dockerfile
+/opt/app/docker-compose.yml
+/opt/app/requirements.txt
+/opt/app/.dockerignore
+/opt/app/.env
+/opt/app/backups/
 ```
 
-Старые заявки из Mini Support Desk v1 сохранены в backup `tickets.json.bak-before-product-model-v2-*`. Рабочий `/opt/app/tickets.json` очищен и используется только под новую модель v2. Категория `legacy` сознательно не используется.
+Backup-и старых версий `app.py`, `tickets.json` и промежуточных Docker/compose правок перенесены в:
 
-Полный текущий код `app.py` фиксируется в `06_config_files_current.md`, а не дублируется здесь.
+```text
+/opt/app/backups/
+```
+
+Старые заявки из Mini Support Desk v1 сохранены в backup `tickets.json.bak-before-product-model-v2-*` внутри `backups/`. Рабочий `/opt/app/tickets.json` используется текущей моделью v2. Категория `legacy` сознательно не используется.
+
+Полный текущий код `app.py`, а также Dockerfile, docker-compose.yml и .dockerignore фиксируются в `06_config_files_current.md`, а не дублируются здесь.
 
 ## Python-приложение
 
@@ -59,8 +64,8 @@
 
 Приложение:
 
-- слушает `0.0.0.0:8080`;
-- работает через `app.service`;
+- слушает `0.0.0.0:8080` внутри Docker container;
+- работает через Docker Compose service `supportdesk-api` / container `misis-digital-student-support-api`;
 - возвращает API-ответы в JSON;
 - хранит заявки в `/opt/app/tickets.json`;
 - пишет product logs в `/var/log/app/app.log`;
@@ -134,6 +139,100 @@ Active/resolved logic:
 ```
 
 При переводе заявки в `resolved` заполняется `resolved_at`. При reopen обратно в `open`/`in_progress` поле `resolved_at` сбрасывается в `null`.
+
+## Docker runtime после этапа 15
+
+Docker установлен на `app` как server-side Docker Engine.
+
+Проверенное состояние:
+
+```text
+Docker Engine: 29.4.3
+Docker Compose: v5.1.3
+docker.service: active/enabled
+image: misis-digital-student-support-api:local
+container: misis-digital-student-support-api
+compose service: supportdesk-api
+external port: 8080 -> container 8080
+```
+
+Файлы Docker runtime:
+
+```text
+/opt/app/Dockerfile
+/opt/app/docker-compose.yml
+/opt/app/requirements.txt
+/opt/app/.dockerignore
+/opt/app/.env
+```
+
+Текущий compose-запуск:
+
+```bash
+cd /opt/app
+sudo docker compose ps
+sudo docker compose up -d
+sudo docker compose restart
+sudo docker compose down
+```
+
+Текущие volume mounts:
+
+```text
+/opt/app:/opt/app
+/var/log/app:/var/log/app
+```
+
+Примечание: `/opt/app:/opt/app` — осознанный временный workaround до PostgreSQL stage. Первичная попытка монтировать только `/opt/app/tickets.json:/opt/app/tickets.json` ломала `POST/PATCH`, потому что приложение сохраняет данные через временный файл и `os.replace()`. Для такого способа записи `tickets.json` и `tickets.json.tmp` должны быть в одной mounted директории. После миграции на PostgreSQL этот volume должен быть убран: код будет жить в image, данные — в БД.
+
+`/var/log/app:/var/log/app` сохранен, чтобы Promtail продолжал читать `/var/log/app/app.log` без изменения текущего Loki/Grafana flow. Позже app logs можно перенести в stdout/stderr и собирать контейнерные логи через отдельный collector.
+
+Проверенные команды после Dockerization:
+
+```bash
+curl -s http://localhost:8080/v1/health | python3 -m json.tool
+curl -s http://localhost:8080/metrics | head
+curl -s http://192.168.85.131/api/v1/health | python3 -m json.tool
+curl -s -X POST http://192.168.85.131/api/v1/tickets -H "Content-Type: application/json" -d '{...}'
+curl -s -X PATCH http://192.168.85.131/api/v1/tickets/<id>/status -H "Content-Type: application/json" -d '{...}'
+```
+
+Подтверждено:
+
+```text
+health -> ok
+metrics -> supportdesk_* and supportdesk_http_* доступны
+POST ticket -> создает заявку
+PATCH status -> меняет статус
+Prometheus up{job="supportdesk-api"} -> 1
+Nginx reverse proxy flow работает без изменения config
+Loki/Grafana получают app logs через Promtail
+```
+
+## Legacy app.service после Dockerization
+
+Файл systemd unit остался:
+
+```text
+/etc/systemd/system/app.service
+```
+
+Текущее состояние:
+
+```text
+app.service inactive/dead
+app.service disabled
+```
+
+Сервис сохранен как rollback-вариант, но не должен автоматически стартовать после reboot, чтобы не конфликтовать с Docker container за порт `8080`.
+
+Rollback на старый systemd runtime:
+
+```bash
+cd /opt/app
+sudo docker compose down
+sudo systemctl start app.service
+```
 
 ## Data storage
 
@@ -299,13 +398,15 @@ env="lab"
 
 ## systemd unit приложения
 
-Файл:
+Файл legacy unit:
 
 ```text
 /etc/systemd/system/app.service
 ```
 
-Сервис работает как:
+После Dockerization `app.service` больше не является основным runtime. Он отключен из автозапуска и находится в состоянии `inactive/dead`, но сохранен для rollback.
+
+Старый способ запуска:
 
 ```text
 User=pelmel
@@ -314,27 +415,30 @@ ExecStart=/usr/bin/python3 /opt/app/app.py
 Restart=always
 ```
 
-Проверки:
+Текущий основной способ запуска:
 
 ```bash
-systemctl status app.service --no-pager
+cd /opt/app
+sudo docker compose up -d
+```
+
+Проверки текущего Docker runtime:
+
+```bash
+sudo docker compose ps
+ss -tulpn | grep :8080
 curl -s http://localhost:8080/v1/health | python3 -m json.tool
-curl -s http://localhost:8080/v1/support-model | python3 -m json.tool
-curl -s http://localhost:8080/v1/tickets | python3 -m json.tool
-curl -s http://localhost:8080/metrics
+curl -s http://localhost:8080/metrics | head
 ```
 
 Подтверждено:
 
-- `app.service active (running)`;
+- container `misis-digital-student-support-api` `Up`;
+- порт `8080` слушает `docker-proxy`;
 - `/v1/health` возвращает `MISIS_Digital Student Support` JSON;
-- `/v1/support-model` возвращает список цифровых сервисов и ресурсов;
-- `/v1/tickets` возвращает active tickets;
 - `/metrics` возвращает product metrics, Product observability v2 metrics и HTTP/API request metrics;
-- неверная пара `category/resource` возвращает validation error;
-- при остановке `app.service` alert `SupportDeskApiDown` переходит в `FIRING`;
-- при генерации 4xx-трафика alert `SupportDeskHigh4xxRate` переходит в `FIRING`;
-- p95 latency считается через histogram `supportdesk_http_request_duration_seconds_*`.
+- `POST /v1/tickets` и `PATCH /v1/tickets/<id>/status` работают после volume fix;
+- Prometheus `up{job="supportdesk-api"}` возвращает `1`.
 
 ## Promtail
 
@@ -403,3 +507,8 @@ category=<category из app log line>
 - Product observability v2 metrics `supportdesk_tickets_current` и `supportdesk_active_ticket_age_seconds_max` работают и видны в Prometheus/Grafana;
 - HTTP request counter и latency histogram работают, видны в Prometheus и используются в Grafana/alerts;
 - системные метрики доступны Prometheus через node_exporter.
+
+
+## Dockerization stage result
+
+Этап 15 завершен: backend `MISIS_Digital Student Support API` перенесен из systemd-managed Python process в Docker container. Внешний контракт сохранен: `app:8080`, `/metrics`, Nginx reverse proxy, Prometheus scrape и Promtail/Loki flow работают без изменения внешних адресов и портов.

@@ -80,7 +80,7 @@ future db: 22/tcp, 5432/tcp PostgreSQL, 9100/tcp node_exporter, возможно
 
 ```text
 Browser/Windows -> web 192.168.85.131:80
-web/Nginx -> app 192.168.85.133:8080
+web/Nginx -> app 192.168.85.133:8080 (теперь Docker container)
 ```
 
 Внешние URL:
@@ -97,6 +97,8 @@ Reverse proxy:
 /api/* -> http://192.168.85.133:8080/
 ```
 
+После Dockerization внешний endpoint не изменился: `app:8080` теперь обслуживает Docker container `misis-digital-student-support-api`, а не `app.service`. Для `web` и пользователя flow остался тем же.
+
 Важно: в app logs `client_ip=192.168.85.131`, потому что backend видит Nginx reverse proxy как TCP-клиента. Исходный клиент фиксируется через `x_forwarded_for`, обычно `192.168.85.1`.
 
 ## Monitoring network flow
@@ -108,7 +110,7 @@ monitor/Prometheus -> web:9100 node_exporter
 monitor/Prometheus -> app:9100 node_exporter
 monitor/Prometheus -> log:9100 node_exporter
 monitor/Prometheus -> monitor:9100 node_exporter
-monitor/Prometheus -> app:8080/metrics supportdesk-api product metrics
+monitor/Prometheus -> app:8080/metrics supportdesk-api product/HTTP metrics (теперь Docker container)
 Prometheus -> Alertmanager localhost:9093
 Grafana -> Prometheus localhost:9090
 Grafana -> Loki 192.168.85.135:3100

@@ -789,6 +789,188 @@ App logs panel query:
 
 Примечание: `ticket_list_requested` сознательно оставлен в panel, потому что показывает, что UI реально ходит в backend за списком заявок.
 
+
+## Docker runtime для MISIS_Digital Student Support backend
+
+Этап 15 перевел backend с `app.service` на Docker container без изменения внешнего порта `8080`.
+
+### Docker installation on app
+
+Проверено на `app`:
+
+```text
+Docker Engine 29.4.3
+Docker Compose v5.1.3
+docker.service active/enabled
+```
+
+### Dockerfile
+
+Файл:
+
+```text
+app: /opt/app/Dockerfile
+```
+
+```dockerfile
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+RUN groupadd --gid ${APP_GID} appuser \
+    && useradd --uid ${APP_UID} --gid ${APP_GID} --home-dir /opt/app --shell /usr/sbin/nologin appuser
+
+WORKDIR /opt/app
+
+COPY requirements.txt /opt/app/requirements.txt
+RUN pip install --no-cache-dir -r /opt/app/requirements.txt
+
+COPY app.py /opt/app/app.py
+
+RUN mkdir -p /var/log/app \
+    && chown -R appuser:appuser /opt/app /var/log/app
+
+USER appuser
+
+EXPOSE 8080
+
+CMD ["python", "/opt/app/app.py"]
+```
+
+### requirements.txt
+
+Файл:
+
+```text
+app: /opt/app/requirements.txt
+```
+
+```text
+prometheus_client
+```
+
+### docker-compose.yml
+
+Файл:
+
+```text
+app: /opt/app/docker-compose.yml
+```
+
+```yaml
+services:
+  supportdesk-api:
+    build:
+      context: .
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+    image: misis-digital-student-support-api:local
+    container_name: misis-digital-student-support-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /opt/app:/opt/app
+      - /var/log/app:/var/log/app
+    environment:
+      TZ: UTC
+```
+
+Примечание: `/opt/app:/opt/app` — временный workaround до PostgreSQL stage. Он оставлен, потому что текущий `tickets.json` storage сохраняет файл через `tickets.json.tmp` и `os.replace()`. Mount только одного файла `/opt/app/tickets.json:/opt/app/tickets.json` приводил к `500` на `POST/PATCH`. После перехода на PostgreSQL этот volume нужно убрать, чтобы код жил в image, а состояние — в БД.
+
+`/var/log/app:/var/log/app` сохранен, чтобы текущий Promtail продолжал читать `/var/log/app/app.log`. Позже возможен переход на stdout/stderr container logs.
+
+### .env
+
+Файл:
+
+```text
+app: /opt/app/.env
+```
+
+```env
+APP_UID=1000
+APP_GID=1000
+```
+
+Фактические значения соответствуют UID/GID пользователя `pelmel` на `app`.
+
+### .dockerignore
+
+Файл:
+
+```text
+app: /opt/app/.dockerignore
+```
+
+```dockerignore
+backups/
+*.bak*
+__pycache__/
+*.pyc
+.env
+```
+
+### Runtime commands
+
+```bash
+cd /opt/app
+sudo docker compose build
+sudo docker compose up -d
+sudo docker compose ps
+sudo docker compose restart
+sudo docker compose down
+```
+
+### Проверки после Dockerization
+
+```bash
+curl -s http://localhost:8080/v1/health | python3 -m json.tool
+curl -s http://localhost:8080/metrics | head
+curl -s http://192.168.85.131/api/v1/health | python3 -m json.tool
+curl -s 'http://192.168.85.137:9090/api/v1/query?query=up%7Bjob%3D%22supportdesk-api%22%7D' | python3 -m json.tool
+```
+
+Подтверждено:
+
+```text
+container misis-digital-student-support-api Up
+host 8080 -> container 8080
+/v1/health -> ok
+/metrics -> supportdesk_* and supportdesk_http_* metrics
+POST /api/v1/tickets -> ok
+PATCH /api/v1/tickets/<id>/status -> ok
+Prometheus up{job="supportdesk-api"} -> 1
+```
+
+### Legacy app.service rollback
+
+Файл:
+
+```text
+app: /etc/systemd/system/app.service
+```
+
+Текущее состояние после Dockerization:
+
+```text
+inactive/dead
+disabled
+```
+
+Rollback:
+
+```bash
+cd /opt/app
+sudo docker compose down
+sudo systemctl start app.service
+```
+
 ## Nginx reverse proxy для MISIS_Digital Student Support
 
 Файл:

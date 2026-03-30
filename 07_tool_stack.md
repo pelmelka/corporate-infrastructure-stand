@@ -276,16 +276,51 @@ NodeTargetDown                        critical   node_exporter target недос
 
 ### Docker
 
-Планируется как отдельный production-like этап.
+Реализован на `app` как production-like способ доставки backend-а `misis-digital-student-support-api` без переноса всей инфраструктуры в контейнеры.
 
-Экологичный scope:
+Установлено на `app`:
 
 ```text
-Dockerize misis-digital-student-support-api
-Dockerize support-bot позже
+Docker Engine 29.4.3
+Docker Compose v5.1.3
+docker.service active/enabled
 ```
 
-Пока не планируется переносить в Docker:
+Dockerized component:
+
+```text
+misis-digital-student-support-api на app
+```
+
+Текущий Docker runtime:
+
+```text
+image: misis-digital-student-support-api:local
+container: misis-digital-student-support-api
+compose service: supportdesk-api
+host port: 8080 -> container port 8080
+```
+
+Файлы:
+
+```text
+app: /opt/app/Dockerfile
+app: /opt/app/docker-compose.yml
+app: /opt/app/requirements.txt
+app: /opt/app/.dockerignore
+app: /opt/app/.env
+```
+
+Текущие mounts:
+
+```text
+/opt/app:/opt/app
+/var/log/app:/var/log/app
+```
+
+Примечание: `/opt/app:/opt/app` — временный workaround до PostgreSQL. Он нужен, пока storage работает через `/opt/app/tickets.json` и `os.replace()`. После PostgreSQL код должен жить только в image, а данные — в DB.
+
+Пока не переносится в Docker:
 
 ```text
 Prometheus
@@ -295,6 +330,13 @@ Alertmanager
 Nginx
 node_exporter
 admin
+```
+
+Позже планируется:
+
+```text
+Dockerize support-bot
+перевести app logs на stdout/stderr и современный log collector
 ```
 
 ### PostgreSQL

@@ -523,18 +523,63 @@ systemctl status app.service --no-pager
 
 Ожидаемый итог: после восстановления backend-а и выхода 502 из окна `[5m]` оба alert-а гаснут.
 
-## Сценарий 16. Future Dockerized app
+## Сценарий 16. Dockerized app runtime
 
-Цель: будущая демонстрация Docker как способа доставки backend-а.
+Цель: показать, что backend теперь доставляется и запускается через Docker, но внешний пользовательский и observability flow не изменился.
 
-Идея:
+Шаги на `app`:
+
+```bash
+cd /opt/app
+sudo docker compose ps
+ss -tulpn | grep :8080
+curl -s http://localhost:8080/v1/health | python3 -m json.tool
+curl -s http://localhost:8080/metrics | head
+systemctl status app.service --no-pager
+systemctl is-enabled app.service || true
+```
+
+Ожидаемый итог:
 
 ```text
-app.service или docker compose запускает misis-digital-student-support-api container
-web/Nginx продолжает ходить на app:8080
-Prometheus продолжает scrape app:8080/metrics
-Promtail продолжает читать /var/log/app/app.log через volume
+container misis-digital-student-support-api -> Up
+порт 8080 слушает docker-proxy
+/v1/health -> status ok
+/metrics -> supportdesk_* metrics
+app.service -> inactive/dead, disabled
 ```
+
+Проверка через пользовательский путь:
+
+```bash
+curl -s http://192.168.85.131/api/v1/health | python3 -m json.tool
+curl -s -X POST http://192.168.85.131/api/v1/tickets   -H "Content-Type: application/json"   -d '{"category":"newlms-misis","resource":"login","description":"docker demo ticket","priority":"normal","source":"api"}'   | python3 -m json.tool
+```
+
+Проверка Prometheus:
+
+```bash
+curl -s 'http://192.168.85.137:9090/api/v1/query?query=up%7Bjob%3D%22supportdesk-api%22%7D' | python3 -m json.tool
+```
+
+Ожидаемый итог:
+
+```text
+web/Nginx -> app:8080 -> Docker container работает
+Prometheus -> app:8080/metrics возвращает up=1
+Promtail продолжает читать /var/log/app/app.log
+Loki/Grafana показывают app logs
+```
+
+Rollback-сценарий:
+
+```bash
+cd /opt/app
+sudo docker compose down
+sudo systemctl start app.service
+```
+
+Смысл: Dockerization изменила runtime backend-а, но не изменила внешний контракт сервиса.
 
 ## Сценарий 17. Future DB backup/restore
 
