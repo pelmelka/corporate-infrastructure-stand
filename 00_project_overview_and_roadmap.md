@@ -72,6 +72,7 @@ Proxmox VE node: 192.168.85.128:8006
         +-- app      192.168.85.133  Dockerized MISIS_Digital Student Support API + app logs + app metrics + Promtail + node_exporter
         +-- log      192.168.85.135  Loki logging server + node_exporter
         +-- monitor  192.168.85.137  Prometheus + Grafana + Alertmanager + node_exporter
+        +-- db       192.168.85.139  PostgreSQL 17 storage for supportdesk
 ```
 
 ## Реализованные потоки
@@ -80,14 +81,19 @@ Proxmox VE node: 192.168.85.128:8006
 Browser -> web:80                                              # реализовано: MISIS_Digital Student Support frontend
 Browser -> web:80/api/v1/* -> app:8080/v1/*                    # реализовано: Nginx reverse proxy /api/* -> app
 web -> Promtail -> log:3100 Loki                               # реализовано: nginx access/error logs
+app -> db:5432 PostgreSQL                                      # реализовано: tickets + ticket_events storage
 app -> Promtail -> log:3100 Loki                               # реализовано: product logs with category label
-monitor:9090 Prometheus -> node_exporter targets               # реализовано: node (4/4 up)
+monitor:9090 Prometheus -> node_exporter targets               # реализовано: node (5/5 up), включая db
 monitor:9090 Prometheus -> app:8080/metrics                    # реализовано: product metrics + HTTP/API request metrics from Dockerized app
 monitor:9090 Prometheus -> web:9080/metrics                    # реализовано: Promtail custom metric по nginx status_code
+monitor:9090 Prometheus -> db:9187/metrics                     # реализовано: PostgreSQL metrics через postgres_exporter
+db Promtail -> log:3100 Loki                                  # реализовано: PostgreSQL logs в Loki
+db backup-supportdesk.timer -> pg_dump -Fc                    # реализовано: daily backup + restore test
 Grafana -> Prometheus:9090                                     # реализовано: datasource подключен
 Grafana -> Loki:3100                                           # реализовано: datasource подключен
 Prometheus -> Alertmanager:9093                                # реализовано: alerts отправляются в Alertmanager
 admin -> SSH/Ansible -> web/app/log/monitor                    # реализовано: базовый control node
+admin -> SSH/Ansible -> db                                      # реализовано: db добавлен в inventory и service checks
 ```
 
 ## Важное замечание про IP
@@ -115,7 +121,11 @@ Frontend / Nginx server. Сейчас отдает страницу `MISIS_Digit
 
 ## app
 
-Backend/application node. Сейчас Python-приложение работает как Docker container `misis-digital-student-support-api`: `/v1/health`, `/v1/support-model`, `/v1/tickets`, `/v1/tickets/all`, `/v1/tickets/<id>`, `/v1/tickets/<id>/status`, `/metrics`. Заявки хранятся в `/opt/app/tickets.json`; product logs пишутся в `/var/log/app/app.log`; app logs отправляются в Loki через Promtail; product metrics и HTTP/API request metrics собираются Prometheus.
+Backend/application node. Сейчас Python-приложение работает как Docker container `misis-digital-student-support-api`: `/v1/health`, `/v1/support-model`, `/v1/tickets`, `/v1/tickets/all`, `/v1/tickets/<id>`, `/v1/tickets/<id>/status`, `/metrics`. Заявки хранятся в PostgreSQL на `db`; product logs пишутся в `/var/log/app/app.log`; app logs отправляются в Loki через Promtail; product metrics и HTTP/API request metrics собираются Prometheus.
+
+## db
+
+Database node. На нем работает PostgreSQL 17 cluster `17/main`, база `supportdesk`, роль `supportdesk_user`, таблицы `tickets` и `ticket_events`. `app` подключается к `db:5432`; доступ ограничен правилом `pg_hba.conf` для `192.168.85.133/32`. После этапа 17 на `db` также работают node_exporter, postgres_exporter, Promtail для PostgreSQL logs и daily pg_dump backup timer.
 
 ## log
 
@@ -154,7 +164,7 @@ Promtail читает `/var/log/app/*.log` и отправляет app logs в L
 
 ## Этап 5. Метрики node_exporter — завершено
 
-node_exporter установлен на `web`, `app`, `log`, `monitor`; Prometheus видит `node (4/4 up)` с host labels.
+node_exporter установлен на `web`, `app`, `log`, `monitor`, `db`; Prometheus видит `node (5/5 up)` с host labels.
 
 ## Этап 6. Grafana datasources — завершено
 
@@ -517,77 +527,132 @@ sudo systemctl start app.service
 переходить к PostgreSQL, сохраняя Dockerized app как runtime.
 ```
 
-## Этап 16. PostgreSQL вместо tickets.json
+## Этап 16. PostgreSQL вместо tickets.json — завершено
 
 Цель: заменить учебное файловое хранилище на нормальную БД и подготовить основу для event-based product observability.
+
+Сделано:
+
+```text
+создан сервер db 192.168.85.139;
+установлен PostgreSQL 17;
+созданы role/database/schema для supportdesk;
+созданы таблицы tickets и ticket_events;
+созданы индексы для status/category-resource/priority/events/time;
+app получил DB_* env-переменные;
+requirements.txt дополнен psycopg2-binary;
+13 заявок мигрированы из tickets.json;
+для мигрированных заявок созданы events imported_from_json;
+read-path переведен на SQL SELECT;
+metrics переведены на SQL COUNT/GROUP BY/MIN;
+write-path переведен на SQL-native INSERT/UPDATE RETURNING;
+app.py почищен от legacy Python-list storage helpers;
+Docker image пересобран;
+/opt/app:/opt/app volume удален;
+код живет в image, данные живут в PostgreSQL.
+```
 
 Новая архитектура:
 
 ```text
-web -> app -> db/PostgreSQL
+Browser -> web/Nginx -> app/Docker container -> db/PostgreSQL
 ```
 
-Минимальная таблица `tickets`:
+Текущие таблицы:
 
 ```text
-id
-schema_version
-category
-category_label
-resource
-resource_label
-description
-priority
-status
-source
-created_at
-updated_at
-resolved_at
+tickets        текущее состояние заявок
+ticket_events  история событий: imported_from_json, ticket_created, ticket_status_changed
 ```
 
-Желательная таблица `ticket_events` для будущих counters/SLA:
+Проверено:
 
 ```text
-id
-ticket_id
-event
-old_status
-new_status
-source
-created_at
-metadata_json
+/v1/health -> ok;
+/metrics -> supportdesk_tickets_total;
+GET /api/v1/tickets возвращает данные из PostgreSQL;
+POST /api/v1/tickets создает запись в tickets и ticket_events;
+ticket_events.metadata_json содержит write_path=sql_native и storage_backend=postgresql;
+Prometheus supportdesk-api target остается UP;
+Grafana/Loki app logs продолжают работать через /var/log/app/app.log.
 ```
 
-После появления PostgreSQL / `ticket_events` можно корректно добавить:
+Что теперь можно делать:
 
 ```text
-supportdesk_tickets_created_total{category,resource,priority,source}
-supportdesk_tickets_resolved_total{category,resource,priority,source}
-supportdesk_ticket_resolution_duration_seconds_*
+демонстрировать настоящий stateful backend с отдельной БД;
+показывать SQL-запросы к tickets/ticket_events;
+показывать audit trail по заявкам;
+строить будущие counters/SLA-метрики из ticket_events;
+переходить к DB observability и backup/restore.
 ```
 
-Будущие alerts на этом фундаменте:
+## Этап 17. DB observability и backups — завершено
+
+Цель: сделать БД наблюдаемой и восстановимой: видеть состояние PostgreSQL, получать DB logs, иметь проверенный backup и доказанный restore.
+
+Сделано на `db`:
 
 ```text
-SupportDeskTicketSpike
-SupportDeskCreatedOutpacesResolved
-SupportDeskSlowResolution
-SupportDeskNoResolutionsForActiveBacklog
+node_exporter установлен и добавлен в общий Prometheus job="node";
+postgres_exporter установлен и слушает :9187;
+postgres_exporter подключается к PostgreSQL ролью postgres_exporter через DATA_SOURCE_NAME;
+Promtail установлен на db и читает /var/log/postgresql/*.log;
+PostgreSQL logs уходят в Loki с labels host=db, job=postgresql, service=postgresql, env=lab;
+pg_dump backup script создан: /usr/local/sbin/backup_supportdesk.sh;
+backup-supportdesk.service Type=oneshot;
+backup-supportdesk.timer daily 03:15 MSK, Persistent=true;
+retention policy: 7 дней;
+backup формат: pg_dump -Fc;
+для каждого dump создается .sha256;
+latest.dump symlink указывает на последний dump;
+restore test выполнен в отдельную БД supportdesk_restore_test;
+после проверки supportdesk_restore_test удалена.
 ```
 
-## Этап 17. DB observability и backups
-
-Цель: сделать БД наблюдаемой и восстановимой.
-
-Что сделать:
+Сделано на `monitor`:
 
 ```text
-node_exporter на db
-postgres_exporter на db
-Prometheus scrape для db metrics
-Grafana DB panels
-DB alerts
-pg_dump backup + restore test
+Prometheus node target теперь 5/5 up, включая db;
+добавлен Prometheus job="postgres" target 192.168.85.139:9187;
+postgres target 1/1 up;
+проверены метрики pg_up, pg_database_size_bytes, pg_stat_database_numbackends, pg_settings_max_connections;
+добавлены alerts PostgreSQLExporterDown, PostgreSQLDown, PostgreSQLTooManyConnections;
+alerts PostgreSQLExporterDown и PostgreSQLDown протестированы;
+Grafana dashboard Infrastructure Overview получил блок PostgreSQL / Supportdesk DB.
+```
+
+Grafana DB panels:
+
+```text
+DB Health: postgres_exporter UP, PostgreSQL UP, supportdesk DB size, DB alerts firing, DB Connections;
+DB Connections: % used connections for supportdesk relative to max_connections;
+DB Activity: commits/sec и rollbacks/sec по базе supportdesk;
+PostgreSQL Important Logs: ERROR/FATAL/PANIC/startup/shutdown/deadlock/termination события из Loki.
+```
+
+Сделано на `admin`:
+
+```text
+inventory/hosts.ini дополнен группой db_nodes и db включен в managed;
+check_services.yml обновлен под Dockerized app: docker.service + /v1/health + /metrics вместо старого app.service;
+check_services.yml дополнен db checks: pg_lsclusters, node_exporter, postgres_exporter, promtail, backup timer;
+ansible-playbook playbooks/check_services.yml проходит: app ok=5, db ok=5, log ok=2, monitor ok=4, web ok=3;
+изменения зафиксированы commit 23771ba Add DB observability checks and PostgreSQL alerts.
+```
+
+Что теперь можно делать:
+
+```text
+видеть, что db как Linux-нода доступна;
+видеть, что PostgreSQL как процесс/кластер доступен;
+отличать down postgres_exporter от down самой PostgreSQL;
+смотреть PostgreSQL logs в Grafana/Loki;
+видеть размер supportdesk DB, активность транзакций и текущую загрузку connections;
+получать DB alerts;
+создавать ежедневные backup-и;
+проверять checksum dump-файлов;
+доказывать восстановимость через restore test в отдельную БД.
 ```
 
 ## Этап 18. Telegram support bot
@@ -680,9 +745,9 @@ Snapshots/контрольные точки в Proxmox
 # Текущий маркер прогресса
 
 ```text
-Последний завершенный этап: Этап 15. Dockerization.
-Текущий следующий этап: Этап 16. PostgreSQL вместо tickets.json.
-Далее: PostgreSQL, DB observability, Telegram bot, hardening, Ansible automation v2, final README/demo.
+Последний завершенный этап: Этап 17. DB observability и backups.
+Текущий следующий этап: Этап 18. Telegram support bot.
+Далее: Telegram bot, hardening, Ansible automation v2, final README/demo.
 ```
 
 ## Текущий прогресс проекта
@@ -690,13 +755,14 @@ Snapshots/контрольные точки в Proxmox
 Важно: прогресс считается относительно расширенного production-like roadmap.
 
 ```text
-Формальная готовность по расширенному roadmap: 15/21 основных этапов завершены ≈ 71%.
+Формальная готовность по расширенному roadmap: 17/21 основных этапов завершены ≈ 81%.
 Готовность core infrastructure lab: 100% по этапам 1–10.
 Admin/Ansible foundation: 100%.
 Product model v2: 100%.
-Инженерная готовность по новому production-like scope: 76–81%.
-Демонстрационная готовность текущего core-проекта: 95–97%.
-Финальная демонстрационная готовность с DB/Bot/Ansible v2: 60–67%.
+DB observability и backups: 100%.
+Инженерная готовность по новому production-like scope: 86–90%.
+Демонстрационная готовность текущего core-проекта: 98–99%.
+Финальная демонстрационная готовность с DB/Bot/Ansible v2: 68–74%.
 ```
 
 Разбивка по этапам:
@@ -718,9 +784,9 @@ Product model v2: 100%.
 | 13. Product observability v2 | завершено | 100% | Добавлены current/age metrics, Grafana panels, product alerts по category/resource/critical age; старый TooManyOpenTickets удален. |
 | 14. HTTP request/error-rate observability | завершено | 100% | Добавлены HTTP request counter, latency histogram, app-level 4xx/5xx/latency alerts, Promtail nginx status metric, promtail-web target, Nginx502Spike и HTTP/API Grafana panels. |
 | 15. Dockerization | завершено | 100% | Backend перенесен в Docker container, порт 8080 и observability flow сохранены, app.service disabled как rollback-вариант. |
-| 16. PostgreSQL migration | следующий этап | 0–5% | Сейчас используется `/opt/app/tickets.json`; после DB migration нужно убрать временный `/opt/app:/opt/app` volume. |
-| 17. DB observability + backups | план | 0–5% | Зависит от появления DB server. |
-| 18. Telegram support bot | plan/future | 5–10% | Сетевой workaround проверен, сам bot еще не реализован. |
+| 16. PostgreSQL migration | завершено | 100% | Создан db, PostgreSQL 17, tickets/ticket_events, миграция из JSON, SQL-native read/write path, app.py cleanup, `/opt/app:/opt/app` volume удален. |
+| 17. DB observability + backups | завершено | 100% | db добавлен в Ansible/Prometheus/Grafana/Loki; postgres_exporter, DB alerts, PostgreSQL logs, pg_dump backup, checksum, restore test и systemd timer готовы. |
+| 18. Telegram support bot | следующий этап | 5–10% | Сетевой workaround проверен, сам bot еще не реализован. |
 | 19. Security/network hardening | план | 5–10% | Есть proxy headers, но ограничения доступа/HTTPS еще впереди. |
 | 20. Ansible automation v2 | план | 0–10% | Зависит от дальнейшей формализации deploy. |
 | 21. Final README/demo packaging | план | 25–35% | Sources ведутся, но финальный README/demo/snapshots еще не собраны. |

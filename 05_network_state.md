@@ -19,15 +19,10 @@ Proxmox и все VM сейчас находятся в этой сети чер
 | Proxmox | 192.168.85.128 | гипервизор | зафиксирован на Proxmox |
 | admin | 192.168.85.129 | control node | DHCP сейчас держится стабильно |
 | web | 192.168.85.131 | nginx frontend/reverse proxy | DHCP сейчас держится стабильно |
-| app | 192.168.85.133 | support-desk-api backend | DHCP сейчас держится стабильно |
+| app | 192.168.85.133 | Dockerized backend API | DHCP сейчас держится стабильно |
 | log | 192.168.85.135 | Loki logging | DHCP сейчас держится стабильно |
 | monitor | 192.168.85.137 | Prometheus/Grafana/Alertmanager | DHCP сейчас держится стабильно |
-
-Future planned:
-
-```text
-db 192.168.85.xxx PostgreSQL
-```
+| db | 192.168.85.139 | PostgreSQL storage | DHCP сейчас держится стабильно |
 
 ## Gateway/DNS
 
@@ -46,7 +41,7 @@ VMnet8 host adapter: 192.168.85.1
 
 ## Важное замечание про DHCP/static
 
-Сейчас VM получают IP через DHCP VMware NAT. Для более воспроизводимой инфраструктуры позже нужно сделать DHCP reservation по MAC или статические IP внутри Debian.
+Сейчас VM получают IP через DHCP VMware NAT. Для воспроизводимости позже нужно сделать DHCP reservation по MAC или статические IP внутри Debian.
 
 Это особенно важно для:
 
@@ -56,8 +51,7 @@ Prometheus targets
 Grafana datasources
 Ansible inventory
 Nginx reverse proxy
-future db server
-future Docker deployment
+app -> db PostgreSQL
 future Telegram bot
 ```
 
@@ -67,28 +61,20 @@ future Telegram bot
 Proxmox: 8006/tcp
 admin:   22/tcp
 web:     22/tcp, 80/tcp, 9080/tcp Promtail, 9100/tcp node_exporter
-app:     22/tcp, 8080/tcp support-desk-api, 9080/tcp Promtail, 9100/tcp node_exporter
+app:     22/tcp, 8080/tcp MISIS_Digital Student Support API, 9080/tcp Promtail, 9100/tcp node_exporter
 log:     22/tcp, 3100/tcp Loki HTTP, 9095/tcp Loki gRPC, 9100/tcp node_exporter
 monitor: 22/tcp, 3000/tcp Grafana, 9090/tcp Prometheus, 9093/tcp Alertmanager, 9100/tcp node_exporter
+db:      22/tcp, 5432/tcp PostgreSQL, 9080/tcp Promtail, 9100/tcp node_exporter, 9187/tcp postgres_exporter
 Windows host: 10802/tcp portproxy для будущего Telegram bot outbound proxy
-future db: 22/tcp, 5432/tcp PostgreSQL, 9100/tcp node_exporter, возможно postgres_exporter
 ```
 
-## Web/App integration network flow
+## Реализованные network flows
 
-Реализован поток:
+### Web/App/API
 
 ```text
 Browser/Windows -> web 192.168.85.131:80
-web/Nginx -> app 192.168.85.133:8080 (теперь Docker container)
-```
-
-Внешние URL:
-
-```text
-http://192.168.85.131/
-http://192.168.85.131/api/health
-http://192.168.85.131/api/tickets
+web/Nginx -> app 192.168.85.133:8080
 ```
 
 Reverse proxy:
@@ -97,26 +83,70 @@ Reverse proxy:
 /api/* -> http://192.168.85.133:8080/
 ```
 
-После Dockerization внешний endpoint не изменился: `app:8080` теперь обслуживает Docker container `misis-digital-student-support-api`, а не `app.service`. Для `web` и пользователя flow остался тем же.
+После Dockerization внешний endpoint не изменился: `app:8080` обслуживает Docker container `misis-digital-student-support-api`.
 
-Важно: в app logs `client_ip=192.168.85.131`, потому что backend видит Nginx reverse proxy как TCP-клиента. Исходный клиент фиксируется через `x_forwarded_for`, обычно `192.168.85.1`.
+### App/DB
 
-## Monitoring network flow
+```text
+app 192.168.85.133 -> db 192.168.85.139:5432 PostgreSQL
+```
 
-Реализовано:
+PostgreSQL на `db` слушает все адреса через `listen_addresses='*'`:
+
+```text
+0.0.0.0:5432
+[::]:5432
+```
+
+Так сделано из-за DHCP: после reboot конкретный IP `192.168.85.139` может появиться на интерфейсе чуть позже старта PostgreSQL. Bind на `*` убирает эту race condition, а доступ всё равно ограничивается не этим параметром, а `pg_hba.conf`.
+
+В `pg_hba.conf` доступ к БД `supportdesk` для роли `supportdesk_user` разрешен только с `app`:
+
+```text
+host supportdesk supportdesk_user 192.168.85.133/32 scram-sha-256
+```
+
+Проверено с `app`:
+
+```bash
+nc -vzn 192.168.85.139 5432
+PGPASSWORD='<redacted>' psql -h 192.168.85.139 -U supportdesk_user -d supportdesk -P pager=off -c "SELECT current_user, current_database(), inet_server_addr(), inet_client_addr();"
+```
+
+Результат:
+
+```text
+server_addr = 192.168.85.139
+client_addr = 192.168.85.133
+```
+
+### Logging
+
+```text
+web Promtail -> log 192.168.85.135:3100 Loki
+app Promtail -> log 192.168.85.135:3100 Loki
+db Promtail -> log 192.168.85.135:3100 Loki
+```
+
+### Monitoring
 
 ```text
 monitor/Prometheus -> web:9100 node_exporter
 monitor/Prometheus -> app:9100 node_exporter
 monitor/Prometheus -> log:9100 node_exporter
+monitor/Prometheus -> db:9100 node_exporter
 monitor/Prometheus -> monitor:9100 node_exporter
-monitor/Prometheus -> app:8080/metrics supportdesk-api product/HTTP metrics (теперь Docker container)
+monitor/Prometheus -> app:8080/metrics supportdesk-api product/HTTP metrics
+monitor/Prometheus -> web:9080/metrics Promtail custom nginx metrics
+monitor/Prometheus -> db:9187/metrics postgres_exporter
 Prometheus -> Alertmanager localhost:9093
 Grafana -> Prometheus localhost:9090
 Grafana -> Loki 192.168.85.135:3100
 ```
 
-## Admin/Ansible management flow
+DB-specific metrics добавлены: `node_exporter` на `db`, `postgres_exporter` на `db`, Prometheus scrape job `postgres`, Grafana DB panels и DB alerts.
+
+### Admin/Ansible management
 
 Реализовано:
 
@@ -125,82 +155,20 @@ admin/Ansible -> web:22 SSH
 admin/Ansible -> app:22 SSH
 admin/Ansible -> log:22 SSH
 admin/Ansible -> monitor:22 SSH
+admin/Ansible -> db:22 SSH
 ```
 
-SSH key-based login с `admin` на managed nodes работает без пароля пользователя `pelmel`.
-
-Ansible inventory использует текущие адреса:
-
-```text
-web     ansible_host=192.168.85.131
-app     ansible_host=192.168.85.133
-log     ansible_host=192.168.85.135
-monitor ansible_host=192.168.85.137
-```
-
-Подтверждено:
-
-```bash
-ansible all -m ping
-ansible managed -m ping
-ansible-playbook playbooks/check_services.yml
-```
-
-Результат: `SUCCESS` / `failed=0` для всех актуальных managed nodes.
-
-## Проверки Web/App связности
-
-С `web`:
-
-```bash
-curl http://192.168.85.133:8080/health
-curl http://localhost/api/health
-curl http://192.168.85.131/api/health
-```
-
-С `monitor`:
-
-```bash
-curl -s http://192.168.85.133:8080/metrics
-```
-
-Подтверждено: `support-desk-api` отвечает напрямую и через reverse proxy, а Prometheus может scrape app `/metrics`.
+`db` добавлен в Ansible inventory и `check_services.yml`.
 
 ## Telegram bot outbound proxy workaround
 
 Для будущего Telegram support bot проверен исходящий доступ с VM `app` к Telegram API через Windows proxy.
 
-Проблема:
-
-- `app` напрямую не могла подключиться к `https://api.telegram.org`;
-- Invisible Man XRay на Windows слушал только `127.0.0.1:10801`, что недоступно из VM.
-
-Решение:
+Текущий workaround:
 
 ```text
 Windows portproxy:
 192.168.85.1:10802 -> 127.0.0.1:10801
-```
-
-Команды на Windows cmd от администратора:
-
-```cmd
-netsh interface portproxy add v4tov4 listenaddress=192.168.85.1 listenport=10802 connectaddress=127.0.0.1 connectport=10801
-netsh advfirewall firewall add rule name="Allow VM to XRay proxy 10802" dir=in action=allow protocol=TCP localip=192.168.85.1 localport=10802 remoteip=192.168.85.0/24
-```
-
-Проверка с `app`:
-
-```bash
-nc -vzn 192.168.85.1 10802
-curl -x http://192.168.85.1:10802 -I https://api.telegram.org
-```
-
-Результат:
-
-```text
-nc -> open
-curl через proxy -> HTTP response от Telegram
 ```
 
 Будущий env для `support-bot.service`:
@@ -227,7 +195,7 @@ monitor -> metrics endpoints
 Future hardening:
 
 - ограничить прямой доступ к `app:8080`;
-- ограничить доступ к `db:5432`;
+- ограничить доступ к `db:5432` только для `app`/admin-maintenance;
 - добавить HTTPS termination на `web`;
 - добавить DHCP reservation/static IP.
 
