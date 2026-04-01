@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "HTTP/API observability completed. MISIS_Digital Student Support now has app-level HTTP request metrics, latency histogram, error-rate alerts, Promtail nginx 502 metric, promtail-web scrape target, Nginx502Spike and compact Grafana HTTP/API panels.",
-  "last_completed_stage": "HTTP/API observability: supportdesk_http_requests_total, supportdesk_http_request_duration_seconds histogram, SupportDeskHigh4xxRate, SupportDeskHigh5xxRate, SupportDeskHighLatency, promtail_custom_nginx_http_responses_total, Nginx502Spike, Grafana HTTP/API Observability panels",
-  "current_next_stage": "Dockerization: containerize misis-digital-student-support-api while preserving external port 8080, logs volume and current Nginx/Prometheus/Promtail flow",
+  "status": "Dockerization completed. MISIS_Digital Student Support API now runs in Docker on app via docker compose while preserving external port 8080, Nginx reverse proxy flow, Prometheus /metrics scrape and Promtail/Loki file-log flow.",
+  "last_completed_stage": "Dockerization: Docker Engine and Compose installed on app; image misis-digital-student-support-api:local built; container misis-digital-student-support-api runs on host port 8080; app.service disabled but kept for rollback; /opt/app and /var/log/app mounted as transitional volumes until PostgreSQL/stdout logging stages.",
+  "current_next_stage": "PostgreSQL / DB: create separate db VM, install PostgreSQL, migrate tickets storage from /opt/app/tickets.json to database, prepare ticket_events for future counters/SLA metrics.",
   "servers": {
     "admin": "192.168.85.129",
     "web": "192.168.85.131",
@@ -54,5 +54,11 @@
     "10_interaction_guide.md",
     "11_server_monitor_state.md",
     "12_future_improvements_backlog.md"
-  ]
+  ],
+  "runtime": {
+    "app_backend": "Docker container on app:8080 via docker compose",
+    "docker_engine": "29.4.3 on app",
+    "docker_compose": "v5.1.3 on app",
+    "legacy_app_service": "app.service disabled, kept for rollback"
+  }
 }

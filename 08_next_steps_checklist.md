@@ -202,16 +202,35 @@
   - [x] `API p95 Latency by Route`.
 - [x] Дублирующая метрика `supportdesk_errors_total` сознательно не добавлялась: ошибки считаются через `status_code` в `supportdesk_http_requests_total`.
 
-## Текущий следующий этап: Dockerization
+## Завершено: Dockerization
 
-## Далее: Dockerization
-
-- [ ] Создать Dockerfile для `misis-digital-student-support-api`.
-- [ ] Создать `docker-compose.yml` на `app`.
-- [ ] Оставить внешний порт `8080`.
-- [ ] Сохранить app logs через volume `/var/log/app/app.log`.
-- [ ] Проверить, что Nginx, Prometheus и Promtail продолжают работать без изменения внешнего flow.
+- [x] Docker Engine установлен на `app`.
+- [x] `docker.service` active/enabled.
+- [x] Docker Compose plugin установлен и работает.
+- [x] `hello-world` container успешно запущен для проверки Docker daemon/client/image pull.
+- [x] Создан `/opt/app/Dockerfile` для `misis-digital-student-support-api`.
+- [x] Создан `/opt/app/requirements.txt` с `prometheus_client`.
+- [x] Создан `/opt/app/docker-compose.yml`.
+- [x] Создан `/opt/app/.env` для APP_UID/APP_GID build args.
+- [x] Создан `/opt/app/.dockerignore`.
+- [x] Backup-и перенесены в `/opt/app/backups/`.
+- [x] Собран image `misis-digital-student-support-api:local`.
+- [x] Smoke-test container на `18080:8080` успешно прошел.
+- [x] Основной container `misis-digital-student-support-api` запущен через `docker compose up -d`.
+- [x] Внешний порт `8080` сохранен: host `8080` -> container `8080`.
+- [x] Старый `app.service` остановлен и отключен из autostart.
+- [x] `app.service` сохранен как rollback-вариант.
+- [x] `localhost:8080/v1/health` возвращает `status=ok`.
+- [x] `localhost:8080/metrics` отдает product и HTTP/API metrics.
+- [x] Nginx продолжает ходить на `app:8080` без изменения proxy config.
+- [x] `POST /api/v1/tickets` работает после Dockerization.
+- [x] `PATCH /api/v1/tickets/<id>/status` работает после Dockerization.
+- [x] Prometheus `up{job="supportdesk-api"}` возвращает `1`.
+- [x] Promtail/Loki/Grafana продолжают получать app logs из `/var/log/app/app.log`.
+- [x] Зафиксирован временный workaround `/opt/app:/opt/app` до PostgreSQL stage.
 - [ ] Позже контейнеризировать `support-bot`.
+
+## Текущий следующий этап: PostgreSQL / DB
 
 ## Далее: PostgreSQL / DB
 

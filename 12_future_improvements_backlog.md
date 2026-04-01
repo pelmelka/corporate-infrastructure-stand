@@ -186,14 +186,20 @@ supportdesk_5xx_total
 
 ## Dockerization
 
-Экологичный scope:
+Этап 15 завершен в экологичном scope.
+
+Реализовано:
 
 ```text
-Dockerize misis-digital-student-support-api
-Dockerize support-bot позже
+Dockerize misis-digital-student-support-api на app
+Docker Engine 29.4.3
+Docker Compose v5.1.3
+image misis-digital-student-support-api:local
+container misis-digital-student-support-api
+host 8080 -> container 8080
 ```
 
-Не переносить в Docker на текущем этапе:
+Не переносилось в Docker на текущем этапе:
 
 ```text
 Prometheus
@@ -205,13 +211,29 @@ node_exporter
 admin
 ```
 
-Требования:
+Сохраненные внешние контракты:
 
 ```text
 внешний порт app остается 8080
 Nginx продолжает ходить на app:8080
 Prometheus продолжает scrape app:8080/metrics
 Promtail продолжает читать /var/log/app/app.log через volume
+```
+
+Осознанный временный компромисс:
+
+```text
+/opt/app:/opt/app
+```
+
+Причина: текущий файловый storage использует `/opt/app/tickets.json`, временный файл и `os.replace()`. Mount одного файла `tickets.json` ломал POST/PATCH, потому что временный файл и итоговый файл оказывались на разных mount/filesystem слоях. До PostgreSQL этот workaround допустим. После перехода на PostgreSQL volume `/opt/app:/opt/app` нужно убрать.
+
+Будущие Docker improvements:
+
+```text
+Dockerize support-bot позже
+добавить registry/image tags после появления CI/CD или Ansible deploy v2
+перейти с file logs на stdout/stderr + collector после стабилизации Docker/DB
 ```
 
 ## PostgreSQL / storage
