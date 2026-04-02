@@ -2,16 +2,16 @@
 
 ## Назначение
 
-`app` — backend/application server.
+`app` — backend/application server продукта `MISIS_Digital Student Support`.
 
-Роль:
+Текущая роль:
 
 - запускать Dockerized Python backend `misis-digital-student-support-api`;
-- обрабатывать API продукта `MISIS_Digital Student Support`;
-- хранить заявки в lab storage `/opt/app/tickets.json`;
+- принимать API-запросы от `web`/Nginx на `8080`;
+- работать с PostgreSQL на отдельном сервере `db` (`192.168.85.139:5432`);
+- хранить заявки не в локальном `tickets.json`, а в БД `supportdesk`;
 - писать product logs в `/var/log/app/app.log`;
 - отдавать product metrics и HTTP/API request metrics на `/metrics`;
-- работать как Docker container через `docker compose`;
 - отправлять app logs в Loki через Promtail;
 - отдавать системные метрики через node_exporter.
 
@@ -22,10 +22,12 @@
 - IP: `192.168.85.133/24`
 - Interface: `ens18`
 - User: `pelmel`
-- SSH/sudo: работают
-- App runtime: Docker container `misis-digital-student-support-api` `Up` через `docker compose`
-- Legacy app.service: `inactive/dead`, `disabled`, сохранен как rollback-вариант
-- Docker Engine: `active/enabled`
+- Runtime: Docker Compose
+- Container: `misis-digital-student-support-api`
+- Compose service: `supportdesk-api`
+- Image: `misis-digital-student-support-api:local`
+- External port: `8080 -> container 8080`
+- Legacy `app.service`: `inactive/dead`, `disabled`, сохранен только как rollback-вариант
 - Promtail: `active/enabled`
 - node_exporter: `active/enabled`
 
@@ -39,7 +41,6 @@
 
 ```text
 /opt/app/app.py
-/opt/app/tickets.json
 /opt/app/Dockerfile
 /opt/app/docker-compose.yml
 /opt/app/requirements.txt
@@ -48,15 +49,61 @@
 /opt/app/backups/
 ```
 
-Backup-и старых версий `app.py`, `tickets.json` и промежуточных Docker/compose правок перенесены в:
+`/opt/app/tickets.json` больше не является рабочим storage. Он может оставаться на диске как legacy/migration artifact, но текущий backend после этапа 16 читает и пишет заявки через PostgreSQL.
 
-```text
-/opt/app/backups/
+Полный текущий код `app.py`, Dockerfile, Compose config, `.env` template, PostgreSQL DDL и важные команды фиксируются в `06_config_files_current.md`.
+
+## Docker runtime
+
+Текущий compose-запуск:
+
+```bash
+cd /opt/app
+sudo docker compose build
+sudo docker compose up -d
+sudo docker compose ps
+sudo docker compose restart
+sudo docker compose down
 ```
 
-Старые заявки из Mini Support Desk v1 сохранены в backup `tickets.json.bak-before-product-model-v2-*` внутри `backups/`. Рабочий `/opt/app/tickets.json` используется текущей моделью v2. Категория `legacy` сознательно не используется.
+Текущие volume mounts:
 
-Полный текущий код `app.py`, а также Dockerfile, docker-compose.yml и .dockerignore фиксируются в `06_config_files_current.md`, а не дублируются здесь.
+```text
+/var/log/app:/var/log/app
+```
+
+Важно: старый transitional mount `/opt/app:/opt/app` удален после перехода на PostgreSQL. Теперь код живет внутри Docker image, а состояние приложения живет в PostgreSQL на `db`.
+
+`/var/log/app:/var/log/app` сохранен, чтобы текущий Promtail продолжал читать `/var/log/app/app.log` без перестройки logging flow. Позже возможен переход на stdout/stderr container logs.
+
+## DB connectivity
+
+Backend получает параметры PostgreSQL из `/opt/app/.env`, который передается в container через `env_file`.
+
+Текущие переменные окружения приложения:
+
+```text
+DB_HOST=192.168.85.139
+DB_PORT=5432
+DB_NAME=supportdesk
+DB_USER=supportdesk_user
+DB_PASSWORD=<хранится в /opt/app/.env, не фиксируется в sources>
+```
+
+Проверенные DB-связности:
+
+```bash
+PGPASSWORD='<redacted>' psql -h 192.168.85.139 -U supportdesk_user -d supportdesk -P pager=off -c "SELECT current_user, current_database(), inet_server_addr(), inet_client_addr();"
+```
+
+Подтверждено:
+
+```text
+current_user = supportdesk_user
+current_database = supportdesk
+inet_server_addr = 192.168.85.139
+inet_client_addr = 192.168.85.133
+```
 
 ## Python-приложение
 
@@ -65,51 +112,39 @@ Backup-и старых версий `app.py`, `tickets.json` и промежут
 Приложение:
 
 - слушает `0.0.0.0:8080` внутри Docker container;
-- работает через Docker Compose service `supportdesk-api` / container `misis-digital-student-support-api`;
 - возвращает API-ответы в JSON;
-- хранит заявки в `/opt/app/tickets.json`;
+- использует PostgreSQL через `psycopg2`;
+- читает заявки через SQL `SELECT`;
+- создает заявки через SQL `INSERT ... RETURNING`;
+- меняет статусы через `SELECT ... FOR UPDATE` + `UPDATE ... RETURNING`;
+- пишет audit/event history в таблицу `ticket_events`;
+- строит product metrics через SQL `COUNT`, `GROUP BY`, `MIN(created_at)`;
 - пишет product logs в `/var/log/app/app.log`;
-- отдает product metrics и HTTP/API request metrics на `/metrics` в Prometheus text format;
-- поддерживает legacy endpoints и новые `/v1/*` endpoints.
+- поддерживает legacy endpoints и `/v1/*` endpoints.
 
-Product model v2:
-
-```text
-category = цифровой сервис университета
-resource = раздел/функция внутри выбранного сервиса
-```
-
-Текущие category values:
+Актуальная модель кода:
 
 ```text
-newlms-misis
-lk-misis
-gornyak-misis
-folio-misis
-pulse-misis
-vector-misis
-pay-misis
+GET /tickets        -> db_list_tickets()
+GET /tickets/<id>   -> db_get_ticket()
+GET /metrics        -> build_product_metrics_body_from_db()
+POST /tickets       -> create_ticket_in_db()
+PATCH /status       -> update_ticket_status_in_db()
 ```
 
-UI labels:
+Старый Python-list storage layer удален из кода:
 
 ```text
-newlms.misis.ru
-lk.misis.ru
-gornyak.misis.ru
-folio.misis.ru
-pulse.misis.ru
-vector.misis.ru
-pay.misis.ru
+load_tickets()
+save_tickets()
+next_ticket_id()
+active_tickets()
+count_by_status()
+ticket_age_seconds()
+make_list_payload()
 ```
 
-`category` и `resource` обязательны для новых заявок. Backend проверяет, что выбранный `resource` разрешен именно для выбранной `category`. Неправильная пара возвращает ошибку вида:
-
-```text
-invalid_resource_for_category:newlms-misis:plumber-request
-```
-
-Endpoints:
+## Endpoints
 
 ```text
 GET    /health
@@ -140,128 +175,33 @@ Active/resolved logic:
 
 При переводе заявки в `resolved` заполняется `resolved_at`. При reopen обратно в `open`/`in_progress` поле `resolved_at` сбрасывается в `null`.
 
-## Docker runtime после этапа 15
+## PostgreSQL-backed storage
 
-Docker установлен на `app` как server-side Docker Engine.
-
-Проверенное состояние:
+Текущая БД:
 
 ```text
-Docker Engine: 29.4.3
-Docker Compose: v5.1.3
-docker.service: active/enabled
-image: misis-digital-student-support-api:local
-container: misis-digital-student-support-api
-compose service: supportdesk-api
-external port: 8080 -> container 8080
+host: 192.168.85.139
+port: 5432
+database: supportdesk
+role: supportdesk_user
+schema: public
 ```
 
-Файлы Docker runtime:
+Основные таблицы:
 
 ```text
-/opt/app/Dockerfile
-/opt/app/docker-compose.yml
-/opt/app/requirements.txt
-/opt/app/.dockerignore
-/opt/app/.env
+tickets        текущее состояние заявок
+ticket_events  история событий и audit trail
 ```
 
-Текущий compose-запуск:
-
-```bash
-cd /opt/app
-sudo docker compose ps
-sudo docker compose up -d
-sudo docker compose restart
-sudo docker compose down
-```
-
-Текущие volume mounts:
+Проверенный результат после миграции и финальной чистки:
 
 ```text
-/opt/app:/opt/app
-/var/log/app:/var/log/app
+POST через web/Nginx создает новую строку в tickets.
+ticket_events получает event=ticket_created.
+metadata_json содержит write_path=sql_native и storage_backend=postgresql.
+/opt/app/tickets.json больше не меняется как рабочее хранилище.
 ```
-
-Примечание: `/opt/app:/opt/app` — осознанный временный workaround до PostgreSQL stage. Первичная попытка монтировать только `/opt/app/tickets.json:/opt/app/tickets.json` ломала `POST/PATCH`, потому что приложение сохраняет данные через временный файл и `os.replace()`. Для такого способа записи `tickets.json` и `tickets.json.tmp` должны быть в одной mounted директории. После миграции на PostgreSQL этот volume должен быть убран: код будет жить в image, данные — в БД.
-
-`/var/log/app:/var/log/app` сохранен, чтобы Promtail продолжал читать `/var/log/app/app.log` без изменения текущего Loki/Grafana flow. Позже app logs можно перенести в stdout/stderr и собирать контейнерные логи через отдельный collector.
-
-Проверенные команды после Dockerization:
-
-```bash
-curl -s http://localhost:8080/v1/health | python3 -m json.tool
-curl -s http://localhost:8080/metrics | head
-curl -s http://192.168.85.131/api/v1/health | python3 -m json.tool
-curl -s -X POST http://192.168.85.131/api/v1/tickets -H "Content-Type: application/json" -d '{...}'
-curl -s -X PATCH http://192.168.85.131/api/v1/tickets/<id>/status -H "Content-Type: application/json" -d '{...}'
-```
-
-Подтверждено:
-
-```text
-health -> ok
-metrics -> supportdesk_* and supportdesk_http_* доступны
-POST ticket -> создает заявку
-PATCH status -> меняет статус
-Prometheus up{job="supportdesk-api"} -> 1
-Nginx reverse proxy flow работает без изменения config
-Loki/Grafana получают app logs через Promtail
-```
-
-## Legacy app.service после Dockerization
-
-Файл systemd unit остался:
-
-```text
-/etc/systemd/system/app.service
-```
-
-Текущее состояние:
-
-```text
-app.service inactive/dead
-app.service disabled
-```
-
-Сервис сохранен как rollback-вариант, но не должен автоматически стартовать после reboot, чтобы не конфликтовать с Docker container за порт `8080`.
-
-Rollback на старый systemd runtime:
-
-```bash
-cd /opt/app
-sudo docker compose down
-sudo systemctl start app.service
-```
-
-## Data storage
-
-Текущий lab storage:
-
-```text
-/opt/app/tickets.json
-```
-
-Текущая schema для заявки:
-
-```text
-id
-schema_version
-title
-category
-category_label
-resource
-resource_label
-description
-priority
-status
-source
-created_at
-updated_at
-resolved_at
-```
-
-Это простое файловое хранилище для учебного этапа. Запись выполняется через временный файл и `os.replace()`, чтобы снизить риск повреждения файла при перезаписи. Замена на PostgreSQL вынесена в roadmap/future improvements.
 
 ## Product logs
 
@@ -271,7 +211,7 @@ resolved_at
 /var/log/app/app.log
 ```
 
-Текущий формат: `key=value`, совместимый с LogQL `logfmt`.
+Формат: `key=value`, совместимый с LogQL `logfmt`.
 
 Текущие поля product logs:
 
@@ -299,19 +239,9 @@ reason / count при необходимости
 Логика IP-полей:
 
 ```text
-client_ip        = TCP peer для backend-а; обычно web/Nginx: 192.168.85.131
-x_forwarded_for  = исходный клиент до Nginx; обычно Windows/Browser: 192.168.85.1
+client_ip         = TCP peer backend-а; обычно web/Nginx: 192.168.85.131
+x_forwarded_for   = исходный клиент до Nginx; обычно Windows/Browser: 192.168.85.1
 x_forwarded_proto = схема исходного запроса; сейчас http
-```
-
-Примеры product logs:
-
-```text
-service=misis-digital-student-support-api event=ticket_created method=POST path=/v1/tickets status=201 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 ticket_id=4 category=gornyak-misis resource=plumber-request priority=normal source=web
-service=misis-digital-student-support-api event=ticket_status_changed method=PATCH path=/v1/tickets/2/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 ticket_id=2 old_status=open new_status=in_progress category=pay-misis resource=dorm-payment source=web resolved_at=-
-service=misis-digital-student-support-api event=ticket_status_unchanged method=PATCH path=/v1/tickets/2/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 ticket_id=2 old_status=in_progress new_status=in_progress category=pay-misis resource=dorm-payment source=web
-service=misis-digital-student-support-api event=ticket_list_requested method=GET path=/v1/tickets status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 filter=active count=4
-service=misis-digital-student-support-api event=metrics_requested method=GET path=/metrics status=200 client_ip=192.168.85.137 x_forwarded_for=- x_forwarded_proto=- api_version=legacy
 ```
 
 Подтвержденные события:
@@ -331,8 +261,6 @@ event=metrics_requested
 event=internal_error
 ```
 
-Примечание: `ticket_list_requested` сознательно оставлен в dashboard/logs, потому что он показывает активность UI/API и подтверждает пользовательский путь `Browser -> web -> app`.
-
 ## Product metrics
 
 Endpoint:
@@ -341,9 +269,7 @@ Endpoint:
 GET /metrics
 ```
 
-Текущие метрики:
-
-Compatibility metrics:
+Product metrics теперь считаются из PostgreSQL SQL-запросами:
 
 ```text
 supportdesk_tickets_total
@@ -351,16 +277,11 @@ supportdesk_tickets_open
 supportdesk_tickets_in_progress
 supportdesk_tickets_resolved
 supportdesk_tickets_active
-```
-
-Product observability v2 metrics:
-
-```text
 supportdesk_tickets_current{status,category,resource,priority}
 supportdesk_active_ticket_age_seconds_max{category,resource,priority}
 ```
 
-HTTP/API request observability metrics:
+HTTP/API metrics реализованы через `prometheus_client`:
 
 ```text
 supportdesk_http_requests_total{method,route,status_code}
@@ -369,22 +290,16 @@ supportdesk_http_request_duration_seconds_sum{method,route,status_code}
 supportdesk_http_request_duration_seconds_count{method,route,status_code}
 ```
 
-HTTP metrics реализованы через `prometheus_client` с отдельным `CollectorRegistry`, чтобы не засорять `/metrics` лишними runtime/process metrics. Старые product metrics остались ручными и совместимыми с существующими panels/alerts.
-
 Принципы:
 
 ```text
 /metrics не учитывается как пользовательский API request;
 route label нормализуется: /v1/tickets/123/status -> /v1/tickets/{id}/status;
 raw ticket_id и query string не попадают в labels;
-ошибки считаются через status_code, отдельный supportdesk_errors_total не добавлялся как дублирующий.
+product metrics берутся из PostgreSQL, а HTTP runtime metrics из in-memory prometheus_client registry.
 ```
 
-`supportdesk_tickets_current` показывает текущее распределение заявок по статусу, цифровому сервису, ресурсу и приоритету.
-
-`supportdesk_active_ticket_age_seconds_max` считает максимальный возраст активной заявки (`open` или `in_progress`) по `category/resource/priority`. Значение считается как `now - created_at`, поэтому для незакрытой заявки оно растет от scrape к scrape.
-
-Prometheus на `monitor` собирает product и HTTP/API metrics отдельным scrape job:
+Prometheus на `monitor` собирает metrics scrape job:
 
 ```text
 job="supportdesk-api"
@@ -394,51 +309,7 @@ service="support-desk-api"
 env="lab"
 ```
 
-Примечание: Prometheus job/metric names сохранены как `supportdesk-*`, чтобы не ломать существующие dashboard panels и alert rules. На этапе Product observability v2 добавлены только две минимальные product metrics; counters/source/duration отложены до PostgreSQL, `ticket_events` и Telegram/API-client stages.
-
-## systemd unit приложения
-
-Файл legacy unit:
-
-```text
-/etc/systemd/system/app.service
-```
-
-После Dockerization `app.service` больше не является основным runtime. Он отключен из автозапуска и находится в состоянии `inactive/dead`, но сохранен для rollback.
-
-Старый способ запуска:
-
-```text
-User=pelmel
-WorkingDirectory=/opt/app
-ExecStart=/usr/bin/python3 /opt/app/app.py
-Restart=always
-```
-
-Текущий основной способ запуска:
-
-```bash
-cd /opt/app
-sudo docker compose up -d
-```
-
-Проверки текущего Docker runtime:
-
-```bash
-sudo docker compose ps
-ss -tulpn | grep :8080
-curl -s http://localhost:8080/v1/health | python3 -m json.tool
-curl -s http://localhost:8080/metrics | head
-```
-
-Подтверждено:
-
-- container `misis-digital-student-support-api` `Up`;
-- порт `8080` слушает `docker-proxy`;
-- `/v1/health` возвращает `MISIS_Digital Student Support` JSON;
-- `/metrics` возвращает product metrics, Product observability v2 metrics и HTTP/API request metrics;
-- `POST /v1/tickets` и `PATCH /v1/tickets/<id>/status` работают после volume fix;
-- Prometheus `up{job="supportdesk-api"}` возвращает `1`.
+Примечание: Prometheus job/metric names сохранены как `supportdesk-*`, чтобы не ломать существующие dashboard panels и alert rules.
 
 ## Promtail
 
@@ -454,7 +325,7 @@ Promtail читает:
 http://192.168.85.135:3100/loki/api/v1/push
 ```
 
-Текущие static Promtail labels:
+Static labels:
 
 ```text
 host=app
@@ -463,52 +334,23 @@ service=misis-digital-student-support-api
 env=lab
 ```
 
-Текущий dynamic Loki label:
+Dynamic Loki label:
 
 ```text
 category=<category из app log line>
 ```
 
-`category` извлекается pipeline stage из log line вида `category=pay-misis`. Подтверждено, что Grafana Explore находит streams:
-
-```logql
-{host="app", job="app", category="gornyak-misis"}
-{host="app", job="app", category="lk-misis"}
-{host="app", job="app", service="misis-digital-student-support-api", category="pay-misis"}
-```
-
-`resource` пока не вынесен в Loki label и фильтруется как поле строки:
-
-```logql
-{host="app", job="app", service="misis-digital-student-support-api", category="pay-misis"}
-|= "resource=dorm-payment"
-```
-
-Старые logs в Loki остаются в stream `service="support-desk-api"`; новые logs после обновления Promtail идут в stream `service="misis-digital-student-support-api"`.
-
-## node_exporter
-
-`prometheus-node-exporter.service` active/enabled, порт `9100` слушается. Prometheus видит target `host="app"`.
-
-При остановке node_exporter на `app` должен срабатывать alert `NodeTargetDown`.
-
 ## Текущий статус
 
-`app` считается готовым backend node для `MISIS_Digital Student Support`:
+`app` считается готовым backend node для PostgreSQL-backed `MISIS_Digital Student Support`:
 
-- API v1 работает;
-- category/resource validation подтверждена;
-- active/resolved разделение подтверждено;
-- `resolved_at` работает;
-- UI create/status/reopen flow подтвержден;
-- product logs пишутся и доходят в Loki/Grafana;
-- Loki category label работает;
-- product metrics доступны на `/metrics` и собираются Prometheus;
-- Product observability v2 metrics `supportdesk_tickets_current` и `supportdesk_active_ticket_age_seconds_max` работают и видны в Prometheus/Grafana;
-- HTTP request counter и latency histogram работают, видны в Prometheus и используются в Grafana/alerts;
-- системные метрики доступны Prometheus через node_exporter.
-
-
-## Dockerization stage result
-
-Этап 15 завершен: backend `MISIS_Digital Student Support API` перенесен из systemd-managed Python process в Docker container. Внешний контракт сохранен: `app:8080`, `/metrics`, Nginx reverse proxy, Prometheus scrape и Promtail/Loki flow работают без изменения внешних адресов и портов.
+- Docker container `misis-digital-student-support-api` `Up`;
+- `/v1/health` возвращает `status=ok`;
+- `/metrics` возвращает product и HTTP/API metrics;
+- `GET /api/v1/tickets` идет через web/Nginx и возвращает заявки из PostgreSQL;
+- `POST /api/v1/tickets` пишет в PostgreSQL через `INSERT ... RETURNING`;
+- `PATCH /api/v1/tickets/<id>/status` пишет в PostgreSQL через `SELECT ... FOR UPDATE` + `UPDATE ... RETURNING`;
+- `ticket_events` фиксирует `ticket_created` и `ticket_status_changed`;
+- Prometheus `supportdesk-api` target `UP`;
+- Loki/Grafana получают app logs через Promtail;
+- старый `tickets.json` больше не является source of truth.
