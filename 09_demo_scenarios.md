@@ -169,7 +169,8 @@ x_forwarded_for  = Windows/Browser как исходный клиент
 
 ```bash
 # app
-sudo systemctl stop app.service
+cd /opt/app
+sudo docker compose stop supportdesk-api
 
 # web/admin
 curl http://192.168.85.131/api/v1/health
@@ -178,8 +179,9 @@ curl http://192.168.85.131/api/v1/health
 # открыть /targets и /alerts
 
 # app
-sudo systemctl start app.service
-systemctl status app.service --no-pager
+cd /opt/app
+sudo docker compose start supportdesk-api
+sudo docker compose ps
 curl http://localhost:8080/v1/health
 ```
 
@@ -188,7 +190,7 @@ curl http://localhost:8080/v1/health
 ```text
 supportdesk-api target -> DOWN
 SupportDeskApiDown -> PENDING -> FIRING
-после восстановления app.service alert исчезает
+после восстановления Docker container alert исчезает
 ```
 
 ## Сценарий 8. Deprecated TooManyOpenTickets product alert
@@ -491,7 +493,8 @@ API p95 Latency by Route показывает p95 latency по routes в millise
 
 ```bash
 # app
-sudo systemctl stop app.service
+cd /opt/app
+sudo docker compose stop supportdesk-api
 
 # admin/web
 for i in {1..5}; do
@@ -517,8 +520,10 @@ Nginx502Spike = пользовательский путь Browser -> web/Nginx -
 
 ```bash
 # app
-sudo systemctl start app.service
-systemctl status app.service --no-pager
+cd /opt/app
+sudo docker compose start supportdesk-api
+sudo docker compose ps
+curl -s http://localhost:8080/v1/health | python3 -m json.tool
 ```
 
 Ожидаемый итог: после восстановления backend-а и выхода 502 из окна `[5m]` оба alert-а гаснут.
@@ -581,17 +586,11 @@ sudo systemctl start app.service
 
 Смысл: Dockerization изменила runtime backend-а, но не изменила внешний контракт сервиса.
 
-## Сценарий 17. Future DB backup/restore
+## Сценарий 17. PostgreSQL-backed storage demo
 
-Цель: будущая демонстрация stateful service recovery.
+Цель: показать, что backend больше не пишет в `tickets.json`, а использует PostgreSQL на отдельном сервере `db`.
 
-Идея:
-
-1. Заявки хранятся в PostgreSQL.
-2. Выполнить `pg_dump`.
-3. Удалить или изменить тестовые данные.
-4. Восстановить backup.
-5. Показать, что tickets вернулись.
+Практический backup/restore proof после этапа 17 вынесен ниже в сценарий `Backup and restore proof`.
 
 ## Сценарий 18. Future Telegram ticket
 
@@ -604,3 +603,232 @@ sudo systemctl start app.service
 3. Увидеть `source=telegram` в logs.
 4. Увидеть изменение product metrics.
 5. Закрыть заявку из web или Telegram.
+
+
+## Сценарий 17a. PostgreSQL-backed storage и SQL-native backend
+
+Цель: показать, что backend больше не пишет в `tickets.json`, а использует PostgreSQL на отдельном сервере `db`.
+
+1. Проверить health через app:
+
+```bash
+curl -s http://localhost:8080/v1/health | python3 -m json.tool
+```
+
+2. Проверить список заявок через полный web path:
+
+```bash
+curl -s http://192.168.85.131/api/v1/tickets | python3 -m json.tool | head -n 30
+```
+
+3. Создать заявку через web/Nginx:
+
+```bash
+curl -s -X POST http://192.168.85.131/api/v1/tickets \
+  -H "Content-Type: application/json" \
+  -d '{"category":"lk-misis","resource":"service-requests","description":"DB demo ticket","priority":"normal","source":"web"}' \
+  | python3 -m json.tool
+```
+
+4. Проверить последнюю запись в PostgreSQL:
+
+```bash
+PGPASSWORD='<redacted>' psql -h 192.168.85.139 -U supportdesk_user -d supportdesk -P pager=off -c "SELECT id, category, resource, status, source FROM tickets ORDER BY id DESC LIMIT 1;"
+```
+
+5. Проверить audit event:
+
+```bash
+PGPASSWORD='<redacted>' psql -h 192.168.85.139 -U supportdesk_user -d supportdesk -P pager=off -c "SELECT event, old_status, new_status, source, metadata_json FROM ticket_events ORDER BY id DESC LIMIT 1;"
+```
+
+Ожидаемый признак успеха:
+
+```text
+metadata_json содержит {"write_path": "sql_native", "storage_backend": "postgresql"}
+```
+
+6. Проверить, что product metrics продолжают работать:
+
+```bash
+curl -s http://localhost:8080/metrics | grep supportdesk_tickets_total
+```
+
+
+## Сценарий 19. DB observability dashboard
+
+Цель: показать, что БД наблюдается как отдельный слой, а не только как Linux-нода.
+
+Шаги:
+
+1. Открыть Grafana dashboard `Infrastructure Overview`.
+2. Перейти к блоку `PostgreSQL / Supportdesk DB`.
+3. Проверить панели:
+
+```text
+DB Health
+DB Connections
+DB Activity
+PostgreSQL Important Logs
+```
+
+4. Проверить Prometheus queries:
+
+```promql
+up{job="postgres", host="db"}
+pg_up{job="postgres", host="db"}
+pg_database_size_bytes{job="postgres", datname="supportdesk"}
+rate(pg_stat_database_xact_commit{job="postgres", datname="supportdesk"}[5m])
+rate(pg_stat_database_xact_rollback{job="postgres", datname="supportdesk"}[5m])
+```
+
+Ожидаемый итог:
+
+```text
+postgres_exporter UP = UP
+PostgreSQL UP = UP
+supportdesk DB size около нескольких MB
+DB alerts firing = 0
+DB Activity показывает commits/sec, rollbacks/sec обычно 0
+```
+
+Важно: `DB Connections` может показывать `0%`, даже если app ходит в БД. Это нормально, потому что метрика показывает текущие открытые подключения в момент scrape-а, а backend использует короткоживущие подключения.
+
+## Сценарий 20. PostgreSQL Important Logs
+
+Цель: показать поток PostgreSQL logs в Loki/Grafana.
+
+Сгенерировать безопасную ошибку на `db`:
+
+```bash
+sudo -u postgres psql -d supportdesk -c "SELECT * FROM promtail_db_log_test_table;" || true
+```
+
+Проверить Grafana logs panel или Explore:
+
+```logql
+{host="db", job="postgresql"}
+|~ "(ERROR|FATAL|PANIC|shutting down|ready to accept connections|starting PostgreSQL|terminating connection|deadlock)"
+```
+
+Ожидаемый итог:
+
+```text
+ERROR: relation "promtail_db_log_test_table" does not exist
+STATEMENT: SELECT * FROM promtail_db_log_test_table;
+```
+
+## Сценарий 21. PostgreSQLExporterDown alert
+
+Цель: показать разницу между exporter down и PostgreSQL down.
+
+На `db`:
+
+```bash
+sudo systemctl stop prometheus-postgres-exporter.service
+```
+
+На `monitor` / Prometheus UI:
+
+```promql
+up{job="postgres", host="db"}
+```
+
+Ожидаемый итог:
+
+```text
+postgres target DOWN
+PostgreSQLExporterDown -> PENDING/FIRING
+PostgreSQLDown не обязан сработать, потому что сама БД может быть жива, но exporter недоступен
+```
+
+Восстановление:
+
+```bash
+sudo systemctl start prometheus-postgres-exporter.service
+```
+
+## Сценарий 22. PostgreSQLDown alert
+
+Цель: показать alert по недоступности самой PostgreSQL.
+
+На `db`:
+
+```bash
+sudo pg_ctlcluster 17 main stop
+```
+
+Проверить:
+
+```promql
+pg_up{job="postgres", host="db"}
+```
+
+Ожидаемый итог:
+
+```text
+pg_up = 0
+PostgreSQLDown -> PENDING/FIRING
+```
+
+Восстановление:
+
+```bash
+sudo pg_ctlcluster 17 main start
+pg_lsclusters
+```
+
+## Сценарий 23. Backup and restore proof
+
+Цель: показать не просто наличие backup-файла, а доказанную восстановимость.
+
+На `db`:
+
+```bash
+sudo systemctl start backup-supportdesk.service
+sudo journalctl -u backup-supportdesk.service -n 50 --no-pager
+sudo ls -lh /var/backups/postgresql/supportdesk/
+sudo -u postgres bash -c 'sha256sum -c /var/backups/postgresql/supportdesk/*.sha256'
+sudo -u postgres bash -c 'pg_restore -l /var/backups/postgresql/supportdesk/latest.dump | head -n 40'
+```
+
+Restore test в отдельную БД:
+
+```bash
+sudo -u postgres dropdb --if-exists supportdesk_restore_test
+sudo -u postgres createdb supportdesk_restore_test
+sudo -u postgres pg_restore --clean --if-exists -d supportdesk_restore_test /var/backups/postgresql/supportdesk/latest.dump
+sudo -u postgres psql -d supportdesk_restore_test -P pager=off -c "SELECT 'tickets' AS table_name, count(*) FROM tickets UNION ALL SELECT 'ticket_events' AS table_name, count(*) FROM ticket_events;"
+sudo -u postgres dropdb supportdesk_restore_test
+```
+
+Ожидаемый итог:
+
+```text
+checksum OK
+pg_restore -l показывает TABLE public tickets и TABLE public ticket_events
+counts восстановленной БД совпадают с рабочей БД
+supportdesk_restore_test удалена после проверки
+```
+
+## Сценарий 24. Ansible service checks after DB stage
+
+Цель: показать, что `admin` проверяет текущую реальную архитектуру.
+
+На `admin`:
+
+```bash
+cd ~/control-node
+ansible-inventory --graph
+ansible-playbook playbooks/check_services.yml
+```
+
+Ожидаемый итог:
+
+```text
+app:     ok=5 failed=0  # Docker/API endpoints, не старый app.service
+db:      ok=5 failed=0  # PostgreSQL cluster, exporters, Promtail, backup timer
+log:     ok=2 failed=0
+monitor: ok=4 failed=0
+web:     ok=3 failed=0
+```
