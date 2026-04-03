@@ -10,9 +10,10 @@
 - Grafana — визуализация метрик и логов;
 - Alertmanager — прием alerts от Prometheus;
 - node_exporter — системные метрики самого `monitor`;
-- сбор системных метрик с `web`, `app`, `log`;
+- сбор системных метрик с `web`, `app`, `log`, `db`;
 - сбор product metrics и HTTP/API request metrics с `supportdesk-api`;
-- сбор nginx-derived custom metrics с `web` Promtail (`promtail-web`).
+- сбор nginx-derived custom metrics с `web` Promtail (`promtail-web`);
+- сбор PostgreSQL metrics с `db` postgres_exporter (`postgres`).
 
 ## Основная информация
 
@@ -37,9 +38,10 @@ prometheus.service
 - порт `9090`;
 - UI доступен: `http://192.168.85.137:9090`;
 - Prometheus видит Alertmanager;
-- Prometheus видит `node (4/4 up)`;
+- Prometheus видит `node (5/5 up)`;
 - Prometheus видит `supportdesk-api (1/1 up)`;
-- Prometheus видит `promtail-web (1/1 up)`.
+- Prometheus видит `promtail-web (1/1 up)`;
+- Prometheus видит `postgres (1/1 up)`.
 
 Текущие node targets:
 
@@ -48,6 +50,7 @@ monitor: localhost:9100, host="monitor"
 web:     192.168.85.131:9100, host="web"
 app:     192.168.85.133:9100, host="app"
 log:     192.168.85.135:9100, host="log"
+db:      192.168.85.139:9100, host="db"
 ```
 
 Текущий app product + HTTP metrics target:
@@ -82,6 +85,29 @@ promtail_custom_nginx_http_responses_total{job="promtail-web",host="web",status_
 ```
 
 Prometheus при label conflict сохраняет исходные labels из Promtail stream как `exported_host`, `exported_job`, `exported_service`, а target labels оставляет как `host="web"`, `job="promtail-web"`, `service="promtail"`.
+
+
+Текущий PostgreSQL metrics target:
+
+```text
+job="postgres"
+instance="192.168.85.139:9187"
+metrics_path="/metrics"
+host="db"
+service="postgresql"
+env="lab"
+```
+
+Проверенные PostgreSQL metrics:
+
+```text
+pg_up{job="postgres",host="db"} = 1
+pg_database_size_bytes{job="postgres",datname="supportdesk"}
+pg_stat_database_numbackends{job="postgres",datname="supportdesk"}
+pg_settings_max_connections{job="postgres"}
+pg_stat_database_xact_commit{job="postgres",datname="supportdesk"}
+pg_stat_database_xact_rollback{job="postgres",datname="supportdesk"}
+```
 
 Проверенные product metrics:
 
@@ -134,6 +160,9 @@ SupportDeskHighLatency                warning    app p95 latency >0.5s with enou
 Nginx502Spike                         critical   nginx 502 responses >=3 in 5m
 HighDiskUsage                         warning    root filesystem usage >80%
 NodeTargetDown                        critical   up{job="node"} == 0
+PostgreSQLExporterDown                warning    up{job="postgres",host="db"} == 0
+PostgreSQLDown                        critical   pg_up{job="postgres",host="db"} == 0
+PostgreSQLTooManyConnections          warning    supportdesk connections >80% max_connections
 ```
 
 Старый общий alert `TooManyOpenTickets` удален, потому что его заменил более точный product alert `SupportDeskTooManyTicketsForResource`.
@@ -149,7 +178,10 @@ NodeTargetDown                        critical   up{job="node"} == 0
 - `NodeTargetDown` переходит в FIRING при остановке node_exporter на target node;
 - `SupportDeskHigh4xxRate` переходит в FIRING при генерации 4xx-трафика через `/api/bad-endpoint`;
 - `Nginx502Spike` переходит в FIRING при остановке `app.service` и запросах через `web/Nginx`;
-- при stop `app.service` одновременно ожидаемо срабатывает `SupportDeskApiDown`, потому что Prometheus теряет scrape target `supportdesk-api`.
+- при stop/down Dockerized backend одновременно ожидаемо срабатывает `SupportDeskApiDown`, потому что Prometheus теряет scrape target `supportdesk-api`;
+- `PostgreSQLExporterDown` протестирован остановкой `prometheus-postgres-exporter.service`;
+- `PostgreSQLDown` протестирован остановкой PostgreSQL cluster/exporter visibility через `pg_up`;
+- `PostgreSQLTooManyConnections` добавлен как warning при высокой доле used connections.
 
 ## Grafana
 
@@ -270,6 +302,52 @@ App logs panel использует новый Loki stream:
 
 `ticket_list_requested` оставлен в panel сознательно: он показывает активность UI/API, а не только изменения заявок.
 
+## PostgreSQL / Supportdesk DB dashboard block
+
+В dashboard `Infrastructure Overview` добавлен DB-блок:
+
+```text
+DB Health
+DB Connections
+DB Activity
+PostgreSQL Important Logs
+```
+
+`DB Health` показывает:
+
+```promql
+up{job="postgres", host="db"}
+pg_up{job="postgres", host="db"}
+pg_database_size_bytes{job="postgres", datname="supportdesk"}
+sum(ALERTS{alertstate="firing",alertname=~"PostgreSQLExporterDown|PostgreSQLDown|PostgreSQLTooManyConnections"}) or vector(0)
+pg_stat_database_numbackends{job="postgres", datname="supportdesk"}
+```
+
+`DB Connections` показывает долю занятых connections:
+
+```promql
+100 *
+max(pg_stat_database_numbackends{job="postgres", datname="supportdesk"})
+/
+max(pg_settings_max_connections{job="postgres"})
+```
+
+`DB Activity` показывает transaction rate:
+
+```promql
+rate(pg_stat_database_xact_commit{job="postgres", datname="supportdesk"}[5m])
+rate(pg_stat_database_xact_rollback{job="postgres", datname="supportdesk"}[5m])
+```
+
+`PostgreSQL Important Logs` использует Loki:
+
+```logql
+{host="db", job="postgresql"}
+|~ "(ERROR|FATAL|PANIC|shutting down|ready to accept connections|starting PostgreSQL|terminating connection|deadlock)"
+```
+
+Нормальное состояние logs-панели может быть `No data`, если за выбранный период не было важных DB events.
+
 ## Product logs после Product model v2
 
 Grafana/Loki подтверждает прием новых app product logs.
@@ -303,9 +381,30 @@ event=metrics_requested
 
 `monitor` готов как observability node:
 
-- Prometheus собирает system metrics, product metrics, HTTP/API request metrics и Promtail nginx-derived metrics;
-- Grafana показывает dashboard `Infrastructure Overview` с новым блоком HTTP/API Observability;
+- Prometheus собирает system metrics, product metrics, HTTP/API request metrics, Promtail nginx-derived metrics и PostgreSQL metrics;
+- Grafana показывает dashboard `Infrastructure Overview` с блоками HTTP/API Observability и PostgreSQL / Supportdesk DB;
 - Loki datasource показывает web/app logs;
 - App logs panel обновлена под `MISIS_Digital Student Support`;
 - Alertmanager принимает alerts;
-- текущий следующий крупный этап проекта — Dockerization backend-а; HTTP/API observability завершена.
+- последний завершенный крупный этап проекта — DB observability и backups.
+
+
+## PostgreSQL-backed app metrics after stage 16
+
+После этапа 16 Prometheus target `supportdesk-api` остался прежним:
+
+```text
+job="supportdesk-api"
+instance="192.168.85.133:8080"
+host="app"
+```
+
+Но источник product metrics изменился: backend теперь считает `supportdesk_tickets_total`, `supportdesk_tickets_current` и `supportdesk_active_ticket_age_seconds_max` SQL-запросами к PostgreSQL, а не Python-агрегацией поверх `tickets.json`.
+
+Проверено после чистки `app.py`:
+
+```bash
+curl -s http://localhost:8080/metrics | grep supportdesk_tickets_total
+```
+
+DB-specific metrics добавлены на этапе 17: node_exporter на `db`, postgres_exporter на `db`, Prometheus job `postgres`, DB Grafana panels и DB alerts.
