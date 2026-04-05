@@ -207,45 +207,68 @@
 - [x] Docker Engine установлен на `app`.
 - [x] `docker.service` active/enabled.
 - [x] Docker Compose plugin установлен и работает.
-- [x] `hello-world` container успешно запущен для проверки Docker daemon/client/image pull.
 - [x] Создан `/opt/app/Dockerfile` для `misis-digital-student-support-api`.
-- [x] Создан `/opt/app/requirements.txt` с `prometheus_client`.
+- [x] Создан `/opt/app/requirements.txt`.
 - [x] Создан `/opt/app/docker-compose.yml`.
-- [x] Создан `/opt/app/.env` для APP_UID/APP_GID build args.
+- [x] Создан `/opt/app/.env`.
 - [x] Создан `/opt/app/.dockerignore`.
-- [x] Backup-и перенесены в `/opt/app/backups/`.
 - [x] Собран image `misis-digital-student-support-api:local`.
-- [x] Smoke-test container на `18080:8080` успешно прошел.
 - [x] Основной container `misis-digital-student-support-api` запущен через `docker compose up -d`.
 - [x] Внешний порт `8080` сохранен: host `8080` -> container `8080`.
 - [x] Старый `app.service` остановлен и отключен из autostart.
 - [x] `app.service` сохранен как rollback-вариант.
-- [x] `localhost:8080/v1/health` возвращает `status=ok`.
-- [x] `localhost:8080/metrics` отдает product и HTTP/API metrics.
 - [x] Nginx продолжает ходить на `app:8080` без изменения proxy config.
-- [x] `POST /api/v1/tickets` работает после Dockerization.
-- [x] `PATCH /api/v1/tickets/<id>/status` работает после Dockerization.
 - [x] Prometheus `up{job="supportdesk-api"}` возвращает `1`.
 - [x] Promtail/Loki/Grafana продолжают получать app logs из `/var/log/app/app.log`.
-- [x] Зафиксирован временный workaround `/opt/app:/opt/app` до PostgreSQL stage.
-- [ ] Позже контейнеризировать `support-bot`.
 
-## Текущий следующий этап: PostgreSQL / DB
+## Завершено: PostgreSQL / DB / SQL-native backend
 
-## Далее: PostgreSQL / DB
+- [x] Создан отдельный сервер `db`.
+- [x] `db` получил IP `192.168.85.139`.
+- [x] Установлен PostgreSQL 17.
+- [x] Проверен cluster `17/main`, status `online`, port `5432`.
+- [x] Создана роль `supportdesk_user`.
+- [x] Создана база `supportdesk`.
+- [x] Настроены права/schema для `supportdesk_user`.
+- [x] Создана таблица `tickets`.
+- [x] Создана таблица `ticket_events`.
+- [x] Созданы индексы по `status`, `(category, resource)`, `priority`, `ticket_id`, `event`, `created_at`.
+- [x] Настроен `listen_addresses` для localhost и `192.168.85.139`.
+- [x] Настроен `pg_hba.conf`: доступ `supportdesk_user` к `supportdesk` только с `app 192.168.85.133/32`.
+- [x] Проверено `app -> db:5432` через `nc`.
+- [x] Проверено подключение с `app` через `psql` под `supportdesk_user`.
+- [x] Мигрированы 13 заявок из `/opt/app/tickets.json` в PostgreSQL.
+- [x] Для мигрированных заявок созданы `ticket_events` с `event=imported_from_json`.
+- [x] Sequence для `tickets.id` синхронизирован через `setval`.
+- [x] В `/opt/app/.env` добавлены `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+- [x] В `requirements.txt` добавлен `psycopg2-binary`.
+- [x] Backend переведен на PostgreSQL storage.
+- [x] Read-path переведен на SQL: `db_list_tickets()`, `db_get_ticket()`.
+- [x] Product metrics переведены на SQL: `COUNT`, `GROUP BY`, `MIN(created_at)`.
+- [x] Write-path переведен на SQL-native: `INSERT ... RETURNING`, `SELECT ... FOR UPDATE`, `UPDATE ... RETURNING`.
+- [x] `ticket_events` получает `ticket_created` и `ticket_status_changed`.
+- [x] В `metadata_json` фиксируется `write_path=sql_native`, `storage_backend=postgresql`.
+- [x] Старые helpers `load_tickets/save_tickets/next_ticket_id/active_tickets/count_by_status/ticket_age_seconds/make_list_payload` удалены из `app.py`.
+- [x] `app.py` полностью почищен и структурирован: config -> validation -> DB -> metrics -> HTTP handler.
+- [x] Docker image пересобран после чистки кода.
+- [x] Container `misis-digital-student-support-api` запущен и `Up`.
+- [x] `/v1/health` возвращает `status=ok`.
+- [x] `/metrics` возвращает `supportdesk_tickets_total`.
+- [x] `GET /api/v1/tickets` через `web` возвращает заявки из PostgreSQL.
+- [x] `POST /api/v1/tickets` создает запись в `tickets` и событие в `ticket_events`.
+- [x] Старый `/opt/app:/opt/app` volume удален; код живет в Docker image, данные — в PostgreSQL.
 
-- [ ] Создать отдельную VM `db`.
-- [ ] Установить PostgreSQL.
-- [ ] Создать DB/user/schema.
-- [ ] Перевести app storage с `/opt/app/tickets.json` на PostgreSQL.
-- [ ] Добавить таблицу `ticket_events` или аналогичный event storage.
-- [ ] После event storage добавить `supportdesk_tickets_created_total{category,resource,priority,source}`.
-- [ ] После event storage добавить `supportdesk_tickets_resolved_total{category,resource,priority,source}`.
-- [ ] После event storage добавить `supportdesk_ticket_resolution_duration_seconds_*`.
-- [ ] Добавить DB env-файл для app.
-- [ ] Добавить postgres_exporter.
+## Текущий следующий этап: DB observability и backups
+
+- [ ] Добавить `db` в Ansible inventory.
+- [ ] Установить node_exporter на `db`.
+- [ ] Установить postgres_exporter на `db`.
+- [ ] Добавить Prometheus scrape targets для `db`.
+- [ ] Добавить Grafana DB panels.
 - [ ] Добавить DB alerts.
-- [ ] Добавить backup/restore через `pg_dump`.
+- [ ] Настроить `pg_dump` backup.
+- [ ] Выполнить restore test.
+- [ ] Продумать хранение секретов БД вне plain `.env` в будущем.
 
 ## Далее: Telegram support bot
 
@@ -276,3 +299,48 @@
 ```text
 12_future_improvements_backlog.md
 ```
+
+
+## Завершено: DB observability и backups
+
+- [x] `db` добавлен в Ansible inventory как `db_nodes`.
+- [x] `db_nodes` добавлен в `managed:children`.
+- [x] Проверены `ansible db_nodes -m ping` и `ansible managed -m ping`.
+- [x] На `db` установлен и проверен node_exporter.
+- [x] Prometheus `node` target теперь показывает `5/5 up`, включая `host="db"`.
+- [x] На `db` установлен `prometheus-postgres-exporter`.
+- [x] Исправлен `DATA_SOURCE_NAME` для postgres_exporter; `pg_up` стал `1`.
+- [x] Prometheus добавил job `postgres` для `192.168.85.139:9187`.
+- [x] Prometheus показывает `postgres (1/1 up)`.
+- [x] Проверены метрики `pg_up`, `pg_database_size_bytes`, `pg_stat_database_numbackends`, `pg_settings_max_connections`.
+- [x] Добавлены alerts `PostgreSQLExporterDown`, `PostgreSQLDown`, `PostgreSQLTooManyConnections`.
+- [x] DB alerts задеплоены через `deploy_prometheus_rules.yml`.
+- [x] Alerts `PostgreSQLExporterDown` и `PostgreSQLDown` протестированы.
+- [x] На `db` установлен Promtail 3.5.0.
+- [x] Promtail на `db` читает `/var/log/postgresql/*.log`.
+- [x] PostgreSQL logs доходят до Loki и Grafana.
+- [x] В Grafana добавлен DB-блок: `DB Health`, `DB Connections`, `DB Activity`, `PostgreSQL Important Logs`.
+- [x] Создан backup script `/usr/local/sbin/backup_supportdesk.sh`.
+- [x] Backup script делает `pg_dump -Fc`, `.sha256`, `latest.dump` и cleanup старше 7 дней.
+- [x] Исправлена проблема запуска backup из `/home/pelmel` через `cd /` в скрипте.
+- [x] Добавлен `umask 027`, новые backup-файлы создаются с правами `640`.
+- [x] Backup проверен через `sha256sum -c` и `pg_restore -l`.
+- [x] Restore test выполнен в отдельную БД `supportdesk_restore_test`.
+- [x] Counts совпали: `tickets=15`, `ticket_events=18`.
+- [x] Последние события `ticket_events` совпали в рабочей и восстановленной БД.
+- [x] `supportdesk_restore_test` удалена после проверки.
+- [x] Созданы `backup-supportdesk.service` и `backup-supportdesk.timer`.
+- [x] Timer active, следующий запуск daily `03:15 MSK`, `Persistent=true`.
+- [x] `check_services.yml` обновлен: app проверяется через Docker/API endpoints, db через PostgreSQL/exporters/Promtail/backup timer.
+- [x] `ansible-playbook playbooks/check_services.yml` проходит без ошибок.
+- [x] Изменения зафиксированы в Git commit `23771ba Add DB observability checks and PostgreSQL alerts`.
+
+## Следующий крупный этап: Telegram support bot
+
+- [ ] Спроектировать minimal bot flow поверх существующего API v1.
+- [ ] Выбрать runtime: systemd service или Docker container.
+- [ ] Хранить bot token вне Git.
+- [ ] Использовать long polling через уже проверенный outbound proxy workaround.
+- [ ] Создавать заявки через `POST /v1/tickets` с `source=telegram`.
+- [ ] Добавить bot logs в Loki.
+- [ ] После появления второго канала вернуться к `source` dimension в product metrics.
