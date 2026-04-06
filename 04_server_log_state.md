@@ -9,6 +9,7 @@
 - запускать Loki;
 - принимать nginx logs от `web`;
 - принимать app product logs от `app`;
+- принимать PostgreSQL logs от `db`;
 - отдавать logs в Grafana через Loki datasource;
 - отдавать системные метрики через node_exporter.
 
@@ -33,7 +34,7 @@ loki.service
 - `loki.service active (running)`;
 - `enabled`;
 - `/ready -> ready`;
-- web/app logs принимаются.
+- web/app/db logs принимаются.
 
 Важные paths:
 
@@ -161,10 +162,41 @@ service=misis-digital-student-support-api event=ticket_created method=POST path=
 service=misis-digital-student-support-api event=ticket_status_changed method=PATCH path=/v1/tickets/2/status status=200 client_ip=192.168.85.131 x_forwarded_for=192.168.85.1 x_forwarded_proto=http api_version=v1 ticket_id=2 old_status=open new_status=in_progress category=pay-misis resource=dorm-payment source=web resolved_at=-
 ```
 
+
+## DB PostgreSQL logs
+
+После этапа 17 Loki принимает PostgreSQL logs от `db` через Promtail.
+
+Stream:
+
+```logql
+{host="db", job="postgresql"}
+```
+
+Important logs filter для dashboard:
+
+```logql
+{host="db", job="postgresql"}
+|~ "(ERROR|FATAL|PANIC|shutting down|ready to accept connections|starting PostgreSQL|terminating connection|deadlock)"
+```
+
+Проверено тестовой безопасной ошибкой PostgreSQL:
+
+```text
+ERROR: relation "promtail_db_log_test_table" does not exist
+STATEMENT: SELECT * FROM promtail_db_log_test_table;
+```
+
+Подтвержденный поток:
+
+```text
+db PostgreSQL log file -> db Promtail -> log/Loki -> Grafana PostgreSQL Important Logs panel
+```
+
 ## node_exporter
 
 `prometheus-node-exporter.service` active/enabled, порт `9100` слушается. Prometheus видит target `host="log"`.
 
 ## Текущий статус
 
-`log` готов как Loki logging server: принимает nginx logs и app product logs, отдает logs в Grafana, поддерживает фильтрацию app logs по dynamic label `category`, а также отдает системные метрики через node_exporter.
+`log` готов как Loki logging server: принимает nginx logs, app product logs и PostgreSQL logs, отдает logs в Grafana, поддерживает фильтрацию app logs по dynamic label `category`, а также отдает системные метрики через node_exporter.

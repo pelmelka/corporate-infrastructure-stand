@@ -28,11 +28,15 @@ log ansible_host=192.168.85.135
 [monitor_nodes]
 monitor ansible_host=192.168.85.137
 
+[db_nodes]
+db ansible_host=192.168.85.139
+
 [managed:children]
 web_nodes
 app_nodes
 log_nodes
 monitor_nodes
+db_nodes
 
 [all:vars]
 ansible_user=pelmel
@@ -115,9 +119,23 @@ admin: ~/control-node/playbooks/check_services.yml
   gather_facts: false
 
   tasks:
-    - name: Check app
-      ansible.builtin.command: systemctl is-active app.service
+    - name: Check Docker Engine
+      ansible.builtin.command: systemctl is-active docker.service
       changed_when: false
+
+    - name: Check supportdesk API health endpoint
+      ansible.builtin.uri:
+        url: http://localhost:8080/v1/health
+        method: GET
+        status_code: 200
+        return_content: true
+
+    - name: Check supportdesk API metrics endpoint
+      ansible.builtin.uri:
+        url: http://localhost:8080/metrics
+        method: GET
+        status_code: 200
+        return_content: false
 
     - name: Check promtail
       ansible.builtin.command: systemctl is-active promtail.service
@@ -161,6 +179,38 @@ admin: ~/control-node/playbooks/check_services.yml
 
     - name: Check node_exporter
       ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check db services
+  hosts: db_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check PostgreSQL cluster status
+      ansible.builtin.command: pg_lsclusters --no-header
+      changed_when: false
+      register: pg_clusters
+      failed_when: >
+        pg_clusters.stdout_lines
+        | select('match', '^17\s+main\s+5432\s+online\b')
+        | list
+        | length == 0
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+    - name: Check postgres_exporter
+      ansible.builtin.command: systemctl is-active prometheus-postgres-exporter.service
+      changed_when: false
+
+    - name: Check promtail
+      ansible.builtin.command: systemctl is-active promtail.service
+      changed_when: false
+
+    - name: Check backup timer
+      ansible.builtin.command: systemctl is-active backup-supportdesk.timer
       changed_when: false
 ```
 
@@ -377,6 +427,50 @@ scrape_configs:
 - `category` извлекается из app log line и становится dynamic Loki label;
 - `resource` пока остается полем строки и фильтруется через LogQL `|= "resource=..."` или `| logfmt`.
 
+## Promtail config для db
+
+Файл:
+
+```text
+db: /etc/promtail/config.yml
+```
+
+```yaml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/promtail/positions.yml
+
+clients:
+  - url: http://192.168.85.135:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: postgresql
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          host: db
+          job: postgresql
+          service: postgresql
+          env: lab
+          __path__: /var/log/postgresql/*.log
+```
+
+Systemd unit:
+
+```text
+/etc/systemd/system/promtail.service
+ExecStart=/usr/local/bin/promtail -config.file=/etc/promtail/config.yml
+User=promtail
+Group=promtail
+SupplementaryGroups=adm
+```
+
+Пользователь `promtail` добавлен в группу `adm`, чтобы читать `/var/log/postgresql/postgresql-17-main.log`.
+
 ## Prometheus config
 
 Файл:
@@ -423,6 +517,10 @@ scrape_configs:
         labels:
           host: log
 
+      - targets: ['192.168.85.139:9100']
+        labels:
+          host: db
+
   - job_name: supportdesk-api
     metrics_path: /metrics
     static_configs:
@@ -439,6 +537,15 @@ scrape_configs:
         labels:
           host: web
           service: promtail
+          env: lab
+
+  - job_name: postgres
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['192.168.85.139:9187']
+        labels:
+          host: db
+          service: postgresql
           env: lab
 ```
 
@@ -560,6 +667,40 @@ groups:
         annotations:
           summary: "Nginx is returning 502 responses"
           description: "Nginx on web returned {{ $value }} HTTP 502 responses in the last 5 minutes. This usually means the backend app is unavailable or reverse proxy upstream is broken."
+
+      - alert: PostgreSQLExporterDown
+        expr: up{job="postgres", host="db"} == 0
+        for: 30s
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL exporter is down"
+          description: "Prometheus cannot scrape postgres_exporter on {{ $labels.host }} at {{ $labels.instance }}. PostgreSQL may still be running, but DB metrics are unavailable."
+
+      - alert: PostgreSQLDown
+        expr: pg_up{job="postgres", host="db"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "postgres_exporter can be scraped, but it cannot connect to PostgreSQL on {{ $labels.host }}."
+
+      - alert: PostgreSQLTooManyConnections
+        expr: |
+          100 *
+          max(pg_stat_database_numbackends{job="postgres", datname="supportdesk"})
+          /
+          max(pg_settings_max_connections{job="postgres"}) > 80
+        for: 2m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL connection usage is high"
+          description: "supportdesk database uses more than 80% of max_connections. Current value is {{ printf "%.1f" $value }}%."
 
       - alert: HighDiskUsage
         expr: 100 * (1 - (node_filesystem_avail_bytes{job="node", mountpoint="/", fstype="ext4"} / node_filesystem_size_bytes{job="node", mountpoint="/", fstype="ext4"})) > 80
@@ -779,6 +920,41 @@ topk(
 Решение по dashboard: отдельная подробная панель Nginx responses by status code не добавлялась, чтобы сохранить минимальный набор из 4 panels; proxy-level 502 уже виден в `HTTP/API Health Overview`.
 
 
+DB Observability panels:
+
+`DB Health`:
+
+```promql
+up{job="postgres", host="db"}
+pg_up{job="postgres", host="db"}
+pg_database_size_bytes{job="postgres", datname="supportdesk"}
+sum(ALERTS{alertstate="firing",alertname=~"PostgreSQLExporterDown|PostgreSQLDown|PostgreSQLTooManyConnections"}) or vector(0)
+pg_stat_database_numbackends{job="postgres", datname="supportdesk"}
+```
+
+`DB Connections`:
+
+```promql
+100 *
+max(pg_stat_database_numbackends{job="postgres", datname="supportdesk"})
+/
+max(pg_settings_max_connections{job="postgres"})
+```
+
+`DB Activity`:
+
+```promql
+rate(pg_stat_database_xact_commit{job="postgres", datname="supportdesk"}[5m])
+rate(pg_stat_database_xact_rollback{job="postgres", datname="supportdesk"}[5m])
+```
+
+`PostgreSQL Important Logs`:
+
+```logql
+{host="db", job="postgresql"}
+|~ "(ERROR|FATAL|PANIC|shutting down|ready to accept connections|starting PostgreSQL|terminating connection|deadlock)"
+```
+
 App logs panel query:
 
 ```logql
@@ -974,40 +1150,113 @@ CREATE INDEX idx_ticket_events_event ON ticket_events(event);
 CREATE INDEX idx_ticket_events_created_at ON ticket_events(created_at);
 ```
 
-### PostgreSQL network/listen config
-
-Файл:
-
-```text
-db: /etc/postgresql/17/main/postgresql.conf
-```
-
-Актуальная настройка:
-
-```text
-listen_addresses = '*'
-```
-
-Причина: при привязке к конкретному DHCP-IP `192.168.85.139` после reboot PostgreSQL мог стартовать раньше, чем IP появлялся на `ens18`, и поднимался только на localhost. После изменения на `*` повторной ошибки bind после reboot не возникло.
-
-Ожидаемая проверка:
-
-```bash
-sudo ss -tulpn | grep :5432
-```
-
-```text
-0.0.0.0:5432
-[::]:5432
-```
-
 PostgreSQL access rule:
 
 ```text
 host supportdesk supportdesk_user 192.168.85.133/32 scram-sha-256
 ```
 
-Важно: `listen_addresses='*'` означает только, что PostgreSQL слушает сетевые интерфейсы. Кто может подключиться к БД, ограничивается через `pg_hba.conf`; в проекте разрешен только `app` (`192.168.85.133/32`).
+### postgres_exporter config
+
+Файл:
+
+```text
+db: /etc/default/prometheus-postgres-exporter
+```
+
+```text
+DATA_SOURCE_NAME=postgresql://postgres_exporter:<redacted>@localhost:5432/postgres?sslmode=disable
+```
+
+Проверки:
+
+```bash
+systemctl status prometheus-postgres-exporter.service --no-pager
+curl -s http://localhost:9187/metrics | grep -E '^(pg_up|pg_database_size_bytes|pg_stat_database_numbackends|pg_settings_max_connections)'
+```
+
+### PostgreSQL backup script
+
+Файл:
+
+```text
+db: /usr/local/sbin/backup_supportdesk.sh
+```
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+umask 027
+
+BACKUP_DIR="/var/backups/postgresql/supportdesk"
+DB_NAME="supportdesk"
+TIMESTAMP="$(date -u +%Y%m%d-%H%M%S)"
+
+BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.dump"
+CHECKSUM_FILE="${BACKUP_FILE}.sha256"
+LATEST_LINK="${BACKUP_DIR}/latest.dump"
+
+cd /
+mkdir -p "$BACKUP_DIR"
+
+pg_dump -Fc "$DB_NAME" -f "$BACKUP_FILE"
+
+test -s "$BACKUP_FILE"
+
+sha256sum "$BACKUP_FILE" > "$CHECKSUM_FILE"
+
+ln -sfn "$BACKUP_FILE" "$LATEST_LINK"
+
+find "$BACKUP_DIR" -type f -name "${DB_NAME}_*.dump" -mtime +7 -delete
+find "$BACKUP_DIR" -type f -name "${DB_NAME}_*.dump.sha256" -mtime +7 -delete
+
+echo "Backup created: $BACKUP_FILE"
+echo "Checksum created: $CHECKSUM_FILE"
+echo "Latest link: $LATEST_LINK"
+```
+
+### PostgreSQL backup systemd service/timer
+
+Service:
+
+```text
+db: /etc/systemd/system/backup-supportdesk.service
+```
+
+```ini
+[Unit]
+Description=Create PostgreSQL backup for supportdesk database
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+WorkingDirectory=/
+ExecStart=/usr/local/sbin/backup_supportdesk.sh
+```
+
+Timer:
+
+```text
+db: /etc/systemd/system/backup-supportdesk.timer
+```
+
+```ini
+[Unit]
+Description=Run supportdesk PostgreSQL backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+Unit=backup-supportdesk.service
+
+[Install]
+WantedBy=timers.target
+```
+
+Retention policy: daily backups хранятся 7 дней.
 
 ### Runtime commands
 
