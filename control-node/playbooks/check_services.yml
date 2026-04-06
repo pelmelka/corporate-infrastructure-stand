@@ -22,9 +22,23 @@
   gather_facts: false
 
   tasks:
-    - name: Check app
-      ansible.builtin.command: systemctl is-active app.service
+    - name: Check Docker Engine
+      ansible.builtin.command: systemctl is-active docker.service
       changed_when: false
+
+    - name: Check supportdesk API health endpoint
+      ansible.builtin.uri:
+        url: http://localhost:8080/v1/health
+        method: GET
+        status_code: 200
+        return_content: true
+
+    - name: Check supportdesk API metrics endpoint
+      ansible.builtin.uri:
+        url: http://localhost:8080/metrics
+        method: GET
+        status_code: 200
+        return_content: false
 
     - name: Check promtail
       ansible.builtin.command: systemctl is-active promtail.service
@@ -68,4 +82,36 @@
 
     - name: Check node_exporter
       ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+
+- name: Check db services
+  hosts: db_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check PostgreSQL cluster status
+      ansible.builtin.command: pg_lsclusters --no-header
+      changed_when: false
+      register: pg_clusters
+      failed_when: >
+        pg_clusters.stdout_lines
+        | select('match', '^17\s+main\s+5432\s+online\b')
+        | list
+        | length == 0
+
+    - name: Check node_exporter
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter.service
+      changed_when: false
+
+    - name: Check postgres_exporter
+      ansible.builtin.command: systemctl is-active prometheus-postgres-exporter.service
+      changed_when: false
+
+    - name: Check promtail
+      ansible.builtin.command: systemctl is-active promtail.service
+      changed_when: false
+
+    - name: Check backup timer
+      ansible.builtin.command: systemctl is-active backup-supportdesk.timer
       changed_when: false
