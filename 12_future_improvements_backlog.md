@@ -275,18 +275,35 @@ metadata_json
 
 ## DB observability и backups
 
-После добавления PostgreSQL:
+Этап DB observability и backups реализован.
+
+Сделано:
 
 ```text
-postgres_exporter
-PostgreSQL UP panel
-connections panel
-DB size panel
-transaction rate panel
-PostgreSQLDown alert
-TooManyConnections alert
-pg_dump backup
-restore test
+node_exporter на db
+postgres_exporter на db
+Prometheus job postgres
+Grafana DB Health / DB Connections / DB Activity / PostgreSQL Important Logs
+alerts PostgreSQLExporterDown / PostgreSQLDown / PostgreSQLTooManyConnections
+PostgreSQL logs -> Promtail -> Loki
+pg_dump -Fc backup
+sha256 checksum
+latest.dump symlink
+restore test в supportdesk_restore_test
+systemd service + timer
+retention 7 days
+```
+
+Будущие улучшения для backup/DB observability:
+
+```text
+экспортировать Grafana dashboard JSON в Git;
+добавить отдельный backup freshness alert после появления метрики/текстового collector-а;
+добавить backup size / last successful backup panel;
+перенести backups на отдельный storage или remote location;
+добавить weekly/monthly tiered retention;
+автоматизировать restore test отдельным playbook-ом;
+добавить более глубокие PostgreSQL panels: locks, slow queries, cache hit ratio, WAL/checkpoints.
 ```
 
 ## Telegram support bot
@@ -319,7 +336,7 @@ bot logs отправлять в Loki
 
 ```text
 ограничить прямой доступ к app:8080
-ограничить db:5432 после появления DB
+ограничить db:5432 только для app/admin-maintenance
 добавить Nginx security headers
 добавить body size limit
 добавить proxy timeouts
@@ -365,4 +382,32 @@ demo scripts
 troubleshooting scenarios
 backup/restore scenario
 Proxmox snapshots checklist
+```
+
+
+## Реализовано на этапе 16: PostgreSQL-backed storage
+
+Идея переноса storage с `/opt/app/tickets.json` на отдельный PostgreSQL server реализована.
+
+Сделано:
+
+```text
+server db 192.168.85.139;
+PostgreSQL 17;
+database supportdesk;
+tables tickets/ticket_events;
+JSON -> PostgreSQL migration;
+SQL-native GET/POST/PATCH/metrics;
+legacy Python-list helpers removed from app.py.
+```
+
+Остается как future/backlog:
+
+```text
+DB observability: node_exporter/postgres_exporter, Prometheus, Grafana, alerts;
+backup/restore: pg_dump, restore test;
+source-based counters после Telegram/API-client;
+SLA/resolution duration metrics на базе ticket_events;
+секреты БД вне plain .env;
+connection pooling при усложнении backend runtime.
 ```
