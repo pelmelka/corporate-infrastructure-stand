@@ -83,6 +83,7 @@ web     192.168.85.131
 app     192.168.85.133
 log     192.168.85.135
 monitor 192.168.85.137
+db      192.168.85.139
 ```
 
 Проверка SSH с `admin`:
@@ -140,11 +141,15 @@ log ansible_host=192.168.85.135
 [monitor_nodes]
 monitor ansible_host=192.168.85.137
 
+[db_nodes]
+db ansible_host=192.168.85.139
+
 [managed:children]
 web_nodes
 app_nodes
 log_nodes
 monitor_nodes
+db_nodes
 
 [all:vars]
 ansible_user=pelmel
@@ -182,11 +187,11 @@ ansible-playbook playbooks/deploy_prometheus_rules.yml
 
 Подтверждено:
 
-- `ansible all -m ping` возвращает `SUCCESS` для `admin`, `web`, `app`, `log`, `monitor`;
-- `ansible managed -m ping` возвращает `SUCCESS` для `web`, `app`, `log`, `monitor`;
+- `ansible all -m ping` возвращает `SUCCESS` для `admin`, `web`, `app`, `log`, `monitor`, `db`;
+- `ansible managed -m ping` возвращает `SUCCESS` для `web`, `app`, `log`, `monitor`, `db`;
 - `ping_all.yml` проходит по всем узлам;
-- `check_services.yml` проверяет ключевые systemd-сервисы без изменений (`changed=0`);
-- `restart_app.yml` перезапускает `app.service`, затем проверяет active status и `http://localhost:8080/health`;
+- `check_services.yml` проверяет ключевые сервисы без изменений (`changed=0`): web/log/monitor systemd services, Dockerized app через `docker.service` + HTTP endpoints, db через `pg_lsclusters`, exporters, Promtail и backup timer;
+- `restart_app.yml` остается legacy playbook для старого `app.service`; основной runtime после Dockerization проверяется через `check_services.yml` по Docker/API endpoints;
 - `deploy_prometheus_rules.yml` деплоит `/etc/prometheus/supportdesk.rules.yml` на `monitor` с `promtool` validation, проверяет `prometheus.yml`, запускает handlers при изменении rules и проверяет `/-/ready` с retries/delay, чтобы не падать на кратковременный `503` сразу после restart Prometheus.
 
 ## Operational playbook'и
@@ -196,24 +201,30 @@ ansible-playbook playbooks/deploy_prometheus_rules.yml
 ```text
 ping_all.yml                  проверка Ansible-связности всех узлов
 check_services.yml            проверка ключевых сервисов web/app/log/monitor
-restart_app.yml               controlled restart app.service + healthcheck
+restart_app.yml               legacy controlled restart app.service + healthcheck
 deploy_prometheus_rules.yml   деплой Prometheus alert rules + promtool validation + readiness check with retries
 ```
 
 `restart_app.yml` и `deploy_prometheus_rules.yml` используют `become: true` и `vars_prompt` для ввода `ansible_become_password`, чтобы не хранить sudo-пароль в файлах проекта.
 
-После этапа HTTP/API observability локальный source-файл Prometheus rules дополнен новыми alert-ами:
+После этапов HTTP/API observability и DB observability локальный source-файл Prometheus rules содержит app/product/HTTP/infrastructure/DB alert rules.
+
+Дополнительно на этапе 17 обновлен `check_services.yml`:
 
 ```text
-SupportDeskHigh4xxRate
-SupportDeskHigh5xxRate
-SupportDeskHighLatency
-Nginx502Spike
+app: docker.service + http://localhost:8080/v1/health + http://localhost:8080/metrics + promtail + node_exporter
+db: pg_lsclusters --no-header + node_exporter + postgres_exporter + promtail + backup-supportdesk.timer
 ```
 
-`deploy_prometheus_rules.yml` успешно задеплоил обновленные rules на `monitor` после исправления YAML-отступа у `Nginx502Spike`. Валидация `promtool check rules` защитила `monitor` от деплоя битого YAML при первой неудачной попытке.
+`ansible-playbook playbooks/check_services.yml` проходит без ошибок:
 
-Примечание: commit этих изменений в Git в чате не подтвержден. Перед следующим этапом стоит выполнить `git status`, затем `git add files/prometheus/supportdesk.rules.yml` и commit для фиксации этапа 14.
+```text
+app ok=5 failed=0
+db ok=5 failed=0
+log ok=2 failed=0
+monitor ok=4 failed=0
+web ok=3 failed=0
+```
 
 
 ## Структура проекта
@@ -269,13 +280,14 @@ master
 Сделаны commit'ы:
 
 ```text
+23771ba Add DB observability checks and PostgreSQL alerts
 adaa6bd Clean up SupportDesk alert rules
 782db47 Improve Prometheus rules deploy readiness check
 cb5794d Add Ansible project directory placeholders
 b98b8f9 initial Ansible control node setup
 ```
 
-Коммит `782db47` также зафиксировал Product observability v2 Prometheus rules и улучшенный readiness check. Коммит `adaa6bd` удалил старый общий `TooManyOpenTickets` и обновил alert text/service labels под `MISIS_Digital Student Support`.
+Коммит `782db47` также зафиксировал Product observability v2 Prometheus rules и улучшенный readiness check. Коммит `adaa6bd` удалил старый общий `TooManyOpenTickets` и обновил alert text/service labels под `MISIS_Digital Student Support`. Коммит `23771ba` добавил `db` в inventory, DB alert rules и обновленные service checks под Dockerized app и DB observability.
 
 `git status` после commit'ов показывает:
 
@@ -289,11 +301,12 @@ nothing to commit, working tree clean
 
 Завершено:
 
-- SSH key-based доступ с `admin` на `web`, `app`, `log`, `monitor`;
-- полный inventory;
+- SSH key-based доступ с `admin` на `web`, `app`, `log`, `monitor`, `db`;
+- полный inventory с `db_nodes`;
 - `ansible.cfg`;
 - базовая структура `~/control-node`;
 - первые operational playbook'и;
 - Git repo с первыми commit'ами.
 
-Последний завершенный этап проекта: `HTTP/API observability` — app HTTP request metrics, latency histogram, 4xx/5xx/latency alerts, Promtail nginx 502 metric and `Nginx502Spike`.
+Последний завершенный этап проекта: `DB observability и backups` — db добавлен в Ansible, Prometheus/Grafana/Loki, DB alerts, backup/restore и timer готовы.
+

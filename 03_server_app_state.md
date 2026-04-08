@@ -354,3 +354,20 @@ category=<category из app log line>
 - Prometheus `supportdesk-api` target `UP`;
 - Loki/Grafana получают app logs через Promtail;
 - старый `tickets.json` больше не является source of truth.
+
+
+## Ansible operational check after DB stage
+
+После этапа 17 `check_services.yml` больше не проверяет старый `app.service` как основной runtime.
+
+Актуальная проверка `app` через Ansible:
+
+```text
+docker.service active
+http://localhost:8080/v1/health -> 200
+http://localhost:8080/metrics -> 200
+promtail.service active
+prometheus-node-exporter.service active
+```
+
+Это соответствует текущей архитектуре: backend работает в Docker container, а не как systemd `app.service`.
