@@ -7,11 +7,14 @@
 Текущая роль:
 
 - запускать Dockerized Python backend `misis-digital-student-support-api`;
+- запускать Dockerized Telegram bot `misis-digital-support-bot`;
 - принимать API-запросы от `web`/Nginx на `8080`;
+- принимать API-запросы от `support-bot` внутри Docker Compose network;
 - работать с PostgreSQL на отдельном сервере `db` (`192.168.85.139:5432`);
 - хранить заявки не в локальном `tickets.json`, а в БД `supportdesk`;
 - писать product logs в `/var/log/app/app.log`;
-- отдавать product metrics и HTTP/API request metrics на `/metrics`;
+- отдавать product metrics и HTTP/API request metrics backend-а на `8080/metrics`;
+- отдавать native bot metrics на `8090/metrics`;
 - отправлять app logs в Loki через Promtail;
 - отдавать системные метрики через node_exporter.
 
@@ -30,6 +33,9 @@
 - Legacy `app.service`: `inactive/dead`, `disabled`, сохранен только как rollback-вариант
 - Promtail: `active/enabled`
 - node_exporter: `active/enabled`
+- support-bot container: `misis-digital-support-bot`
+- support-bot metrics: `8090/tcp`
+- support-bot logs: `/var/log/bot/support-bot.log`
 
 ## Директория приложения
 
@@ -75,6 +81,105 @@ sudo docker compose down
 Важно: старый transitional mount `/opt/app:/opt/app` удален после перехода на PostgreSQL. Теперь код живет внутри Docker image, а состояние приложения живет в PostgreSQL на `db`.
 
 `/var/log/app:/var/log/app` сохранен, чтобы текущий Promtail продолжал читать `/var/log/app/app.log` без перестройки logging flow. Позже возможен переход на stdout/stderr container logs.
+
+
+## Telegram support bot runtime
+
+После этапа 18 на `app` запущен второй Docker Compose service:
+
+```text
+Compose service: support-bot
+Container: misis-digital-support-bot
+Image: misis-digital-support-bot:local
+Runtime: python-telegram-bot long polling
+Metrics endpoint: 8090/tcp -> container 8090
+Logs: /var/log/bot/support-bot.log
+```
+
+Файлы:
+
+```text
+/opt/app/bot.py
+/opt/app/Dockerfile.bot
+/opt/app/requirements-bot.txt
+/opt/app/.env.bot
+/var/log/bot/support-bot.log
+```
+
+`.env.bot` содержит Telegram token и proxy-настройки, поэтому не фиксируется в Git/sources. В sources хранится только redacted template.
+
+Текущий логический поток:
+
+```text
+Telegram user -> Telegram API -> support-bot container -> supportdesk-api container -> PostgreSQL
+```
+
+Бот не пишет в БД напрямую. Он вызывает backend API v1:
+
+```text
+GET  /v1/health
+GET  /v1/support-model
+GET  /v1/tickets
+POST /v1/tickets
+PATCH /v1/tickets/<id>/status
+```
+
+Создание/закрытие из Telegram передает `source=telegram`, что фиксируется в `tickets.source` и `ticket_events.source`.
+
+Поддержанные команды и сценарии:
+
+```text
+/start     главное меню
+/help      справка
+/new       создание заявки кнопками
+/tickets   active-заявки с пагинацией
+/resolve   закрытие active-заявки с пагинацией
+```
+
+Поддержан whitelist через `ALLOWED_TELEGRAM_USER_IDS`, но сейчас он оставлен пустым для открытого lab/demo-доступа.
+
+## Telegram bot observability on app
+
+Bot logs пишутся отдельно от backend logs:
+
+```text
+/var/log/app/app.log             backend API
+/var/log/bot/support-bot.log     Telegram bot
+```
+
+Promtail на app читает `/var/log/bot/*.log` отдельным stream-ом:
+
+```logql
+{host="app", job="support-bot", service="misis-digital-support-bot"}
+```
+
+Bot metrics отдаются на `8090/metrics`:
+
+```text
+support_bot_info{service,version}
+support_bot_start_time_seconds
+support_bot_actions_total{action}
+support_bot_api_requests_total{method,endpoint,status_code}
+support_bot_api_request_duration_seconds_bucket{method,endpoint,status_code,le}
+support_bot_errors_total{type}
+```
+
+Нормализованные labels:
+
+```text
+action=category_selected/resource_selected/priority_selected/resolve_ticket/...;
+endpoint=/v1/tickets, /v1/support-model, /v1/health, /v1/tickets/{id}/status;
+status_code=200/201/error/4xx/5xx.
+```
+
+Проверенные команды:
+
+```bash
+cd /opt/app
+sudo docker compose ps
+curl -s http://localhost:8090/metrics | grep support_bot
+sudo tail -n 50 /var/log/bot/support-bot.log
+```
 
 ## DB connectivity
 

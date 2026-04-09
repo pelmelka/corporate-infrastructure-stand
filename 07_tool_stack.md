@@ -101,6 +101,25 @@ PATCH /status       -> update_ticket_status_in_db()
 
 Старый storage layer на `tickets.json` удален из runtime-логики.
 
+
+### Python Telegram bot
+
+Новый компонент после этапа 18: `MISIS_Digital Student Support` Telegram bot.
+
+```text
+Bot username: @misis_digital_support_bot
+Runtime host: app
+Compose service: support-bot
+Container: misis-digital-support-bot
+Library: python-telegram-bot==22.7
+HTTP client: httpx
+Metrics: prometheus_client
+Logs: /var/log/bot/support-bot.log
+Metrics endpoint: 8090/metrics
+```
+
+Работает через long polling и outbound proxy, не требует входящего публичного webhook endpoint-а.
+
 ### Docker
 
 Docker Engine и Docker Compose установлены на `app`.
@@ -113,18 +132,24 @@ Docker Compose: v5.1.3
 image: misis-digital-student-support-api:local
 container: misis-digital-student-support-api
 compose service: supportdesk-api
+
+image: misis-digital-support-bot:local
+container: misis-digital-support-bot
+compose service: support-bot
 ```
 
 Compose сохраняет внешний контракт:
 
 ```text
-host app:8080 -> container:8080
+host app:8080 -> supportdesk-api container:8080
+host app:8090 -> support-bot container:8090
 ```
 
 Текущий volume:
 
 ```text
 /var/log/app:/var/log/app
+/var/log/bot:/var/log/bot
 ```
 
 Старый `/opt/app:/opt/app` volume удален после перехода на PostgreSQL.
