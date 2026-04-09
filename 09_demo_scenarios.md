@@ -592,19 +592,130 @@ sudo systemctl start app.service
 
 Практический backup/restore proof после этапа 17 вынесен ниже в сценарий `Backup and restore proof`.
 
-## Сценарий 18. Future Telegram ticket
+## Сценарий 18. Telegram support bot end-to-end
 
-Цель: будущая демонстрация второго клиента к тому же API.
+Цель: показать, что Telegram стал вторым клиентом продукта, но не обходит backend API и БД напрямую.
 
-Идея:
+Поток:
 
-1. Создать заявку из Telegram.
-2. Увидеть ее в web UI.
-3. Увидеть `source=telegram` в logs.
-4. Увидеть изменение product metrics.
-5. Закрыть заявку из web или Telegram.
+```text
+Telegram user -> Telegram API -> support-bot -> supportdesk-api -> PostgreSQL
+```
 
+Шаги demo:
 
+1. Открыть `@misis_digital_support_bot` в Telegram.
+2. Нажать `/start` и показать кнопочное меню.
+3. Создать заявку через `➕ Создать заявку`:
+   - выбрать digital service;
+   - выбрать resource;
+   - выбрать priority;
+   - ввести description;
+   - подтвердить создание.
+4. Показать, что бот вернул номер заявки и `Создана через: telegram`.
+5. В web UI открыть active tickets и показать ту же заявку.
+6. Проверить PostgreSQL audit trail:
+
+```sql
+SELECT id, ticket_id, event, old_status, new_status, source, created_at
+FROM ticket_events
+WHERE ticket_id = <ticket_id>
+ORDER BY id;
+```
+
+Ожидание:
+
+```text
+ticket_created source=telegram
+```
+
+7. Закрыть заявку через Telegram `✅ Закрыть заявку`.
+8. Проверить, что бот показывает:
+
+```text
+Создана через: telegram
+Закрыта через: telegram
+```
+
+9. Проверить DB audit trail:
+
+```text
+ticket_status_changed old_status=open new_status=resolved source=telegram
+```
+
+## Сценарий 19. Telegram bot observability
+
+Цель: показать, что новый bot-container наблюдается через Prometheus, Grafana, Alertmanager и Loki.
+
+Проверки normal state:
+
+```promql
+up{job="support-bot"}
+```
+
+```logql
+{host="app", job="support-bot", service="misis-digital-support-bot"}
+```
+
+Grafana row:
+
+```text
+Telegram Bot Alerts
+Telegram Bot Runtime
+Bot -> API dependency / 30m
+Bot -> API latency by endpoint / 30m
+Bot API requests by endpoint/status / 30m
+Bot actions / 30m
+Bot recent logs
+Bot error logs
+```
+
+Demo bot down:
+
+```bash
+cd /opt/app
+sudo docker compose stop support-bot
+```
+
+Ожидание:
+
+```text
+Prometheus target support-bot DOWN
+SupportBotDown Pending/Firing
+Telegram Bot Alerts показывает SupportBotDown
+```
+
+Recovery:
+
+```bash
+sudo docker compose up -d support-bot
+```
+
+Demo backend dependency error:
+
+```bash
+cd /opt/app
+sudo docker compose stop supportdesk-api
+```
+
+Далее нажать в Telegram действие, которое требует backend API, например `📋 Активные заявки`.
+
+Ожидание:
+
+```text
+SupportBotBackendErrors Pending/Firing
+Bot API requests by endpoint/status показывает endpoint=/v1/tickets status_code=error
+Bot -> API latency by endpoint показывает всплеск latency для /v1/tickets
+Bot error logs показывает ошибочное событие
+```
+
+Recovery:
+
+```bash
+sudo docker compose up -d supportdesk-api
+```
+
+Важно: `SupportBotBackendErrors` срабатывает только после реального bot -> backend запроса. Это не замена `SupportDeskApiDown`, а наблюдение за ошибками backend-зависимости глазами Telegram-клиента.
 ## Сценарий 17a. PostgreSQL-backed storage и SQL-native backend
 
 Цель: показать, что backend больше не пишет в `tickets.json`, а использует PostgreSQL на отдельном сервере `db`.
