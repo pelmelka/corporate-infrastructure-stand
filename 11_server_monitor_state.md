@@ -12,6 +12,7 @@
 - node_exporter — системные метрики самого `monitor`;
 - сбор системных метрик с `web`, `app`, `log`, `db`;
 - сбор product metrics и HTTP/API request metrics с `supportdesk-api`;
+- сбор native metrics с Telegram bot `support-bot`;
 - сбор nginx-derived custom metrics с `web` Promtail (`promtail-web`);
 - сбор PostgreSQL metrics с `db` postgres_exporter (`postgres`).
 
@@ -41,7 +42,8 @@ prometheus.service
 - Prometheus видит `node (5/5 up)`;
 - Prometheus видит `supportdesk-api (1/1 up)`;
 - Prometheus видит `promtail-web (1/1 up)`;
-- Prometheus видит `postgres (1/1 up)`.
+- Prometheus видит `postgres (1/1 up)`;
+- Prometheus видит `support-bot (1/1 up)`.
 
 Текущие node targets:
 
@@ -132,6 +134,31 @@ supportdesk_http_request_duration_seconds_count{method,route,status_code}
 ```
 
 
+
+Текущий Telegram bot metrics target:
+
+```text
+job="support-bot"
+instance="192.168.85.133:8090"
+metrics_path="/metrics"
+host="app"
+service="misis-digital-support-bot"
+env="lab"
+```
+
+Проверенные support-bot metrics:
+
+```text
+support_bot_info{service="misis-digital-support-bot",version="1.0.0"}
+support_bot_start_time_seconds
+support_bot_actions_total{action}
+support_bot_api_requests_total{method,endpoint,status_code}
+support_bot_api_request_duration_seconds_bucket{method,endpoint,status_code,le}
+support_bot_api_request_duration_seconds_sum{method,endpoint,status_code}
+support_bot_api_request_duration_seconds_count{method,endpoint,status_code}
+support_bot_errors_total{type}
+```
+
 ## Prometheus alert rules
 
 Rules file:
@@ -163,9 +190,14 @@ NodeTargetDown                        critical   up{job="node"} == 0
 PostgreSQLExporterDown                warning    up{job="postgres",host="db"} == 0
 PostgreSQLDown                        critical   pg_up{job="postgres",host="db"} == 0
 PostgreSQLTooManyConnections          warning    supportdesk connections >80% max_connections
+SupportBotDown                        critical   up{job="support-bot"} == 0
+SupportBotBackendErrors               warning    bot -> backend API non-2xx/error in 10m, grouped by endpoint/method/status_code
+SupportBotErrorsDetected              warning    non-backend bot errors in 10m (type!=backend_error)
 ```
 
 Старый общий alert `TooManyOpenTickets` удален, потому что его заменил более точный product alert `SupportDeskTooManyTicketsForResource`.
+
+Все alert summaries в `supportdesk.rules.yml` приведены к статичному виду без шаблонов `{{ }}`; динамические значения оставлены в descriptions.
 
 Проверено ранее:
 
@@ -181,7 +213,10 @@ PostgreSQLTooManyConnections          warning    supportdesk connections >80% ma
 - при stop/down Dockerized backend одновременно ожидаемо срабатывает `SupportDeskApiDown`, потому что Prometheus теряет scrape target `supportdesk-api`;
 - `PostgreSQLExporterDown` протестирован остановкой `prometheus-postgres-exporter.service`;
 - `PostgreSQLDown` протестирован остановкой PostgreSQL cluster/exporter visibility через `pg_up`;
-- `PostgreSQLTooManyConnections` добавлен как warning при высокой доле used connections.
+- `PostgreSQLTooManyConnections` добавлен как warning при высокой доле used connections;
+- `SupportBotDown` протестирован остановкой `support-bot` container;
+- `SupportBotBackendErrors` протестирован остановкой `supportdesk-api` и нажатием Telegram-действия, которое требует backend API;
+- `SupportBotErrorsDetected` исключает `backend_error`, чтобы не дублировать `SupportBotBackendErrors`, и предназначен для Telegram/handler/unexpected errors.
 
 ## Grafana
 
@@ -381,12 +416,12 @@ event=metrics_requested
 
 `monitor` готов как observability node:
 
-- Prometheus собирает system metrics, product metrics, HTTP/API request metrics, Promtail nginx-derived metrics и PostgreSQL metrics;
-- Grafana показывает dashboard `Infrastructure Overview` с блоками HTTP/API Observability и PostgreSQL / Supportdesk DB;
-- Loki datasource показывает web/app logs;
+- Prometheus собирает system metrics, product metrics, HTTP/API request metrics, Promtail nginx-derived metrics, PostgreSQL metrics и support-bot metrics;
+- Grafana показывает dashboard `Infrastructure Overview` с блоками HTTP/API Observability, PostgreSQL / Supportdesk DB и Telegram Bot Observability;
+- Loki datasource показывает web/app/db/support-bot logs;
 - App logs panel обновлена под `MISIS_Digital Student Support`;
 - Alertmanager принимает alerts;
-- последний завершенный крупный этап проекта — DB observability и backups.
+- последний завершенный крупный этап проекта — Telegram support bot + bot observability.
 
 
 ## PostgreSQL-backed app metrics after stage 16
@@ -408,3 +443,33 @@ curl -s http://localhost:8080/metrics | grep supportdesk_tickets_total
 ```
 
 DB-specific metrics добавлены на этапе 17: node_exporter на `db`, postgres_exporter на `db`, Prometheus job `postgres`, DB Grafana panels и DB alerts.
+
+
+## Grafana row: Telegram Bot Observability
+
+Добавлен отдельный блок на dashboard `Infrastructure Overview`.
+
+Панели:
+
+```text
+Telegram Bot Alerts
+Telegram Bot Runtime
+Bot -> API dependency / 30m
+Bot -> API latency by endpoint / 30m
+Bot API requests by endpoint/status / 30m
+Bot actions / 30m
+Bot recent logs
+Bot error logs
+```
+
+Назначение блока:
+
+```text
+не дублировать product observability по заявкам;
+показывать состояние самого bot-container;
+показывать зависимость support-bot -> supportdesk-api;
+показывать действия пользователя в Telegram UI;
+давать быстрый drill-down в Loki logs при bot alert.
+```
+
+Ключевые PromQL/LogQL запросы зафиксированы в `06_config_files_current.md`.
