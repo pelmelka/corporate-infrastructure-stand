@@ -52,7 +52,7 @@ Grafana datasources
 Ansible inventory
 Nginx reverse proxy
 app -> db PostgreSQL
-future Telegram bot
+support-bot outbound proxy and bot metrics endpoint
 ```
 
 ## Порты
@@ -61,11 +61,11 @@ future Telegram bot
 Proxmox: 8006/tcp
 admin:   22/tcp
 web:     22/tcp, 80/tcp, 9080/tcp Promtail, 9100/tcp node_exporter
-app:     22/tcp, 8080/tcp MISIS_Digital Student Support API, 9080/tcp Promtail, 9100/tcp node_exporter
+app:     22/tcp, 8080/tcp MISIS_Digital Student Support API, 8090/tcp support-bot metrics, 9080/tcp Promtail, 9100/tcp node_exporter
 log:     22/tcp, 3100/tcp Loki HTTP, 9095/tcp Loki gRPC, 9100/tcp node_exporter
 monitor: 22/tcp, 3000/tcp Grafana, 9090/tcp Prometheus, 9093/tcp Alertmanager, 9100/tcp node_exporter
 db:      22/tcp, 5432/tcp PostgreSQL, 9080/tcp Promtail, 9100/tcp node_exporter, 9187/tcp postgres_exporter
-Windows host: 10802/tcp portproxy для будущего Telegram bot outbound proxy
+Windows host: 10802/tcp portproxy для Telegram bot outbound proxy
 ```
 
 ## Реализованные network flows
@@ -91,13 +91,14 @@ Reverse proxy:
 app 192.168.85.133 -> db 192.168.85.139:5432 PostgreSQL
 ```
 
-PostgreSQL на `db` слушает:
+PostgreSQL на `db` слушает все адреса через `listen_addresses='*'`:
 
 ```text
-127.0.0.1:5432
-192.168.85.139:5432
-[::1]:5432
+0.0.0.0:5432
+[::]:5432
 ```
+
+Так сделано из-за DHCP: после reboot конкретный IP `192.168.85.139` может появиться на интерфейсе чуть позже старта PostgreSQL. Bind на `*` убирает эту race condition, а доступ всё равно ограничивается не этим параметром, а `pg_hba.conf`.
 
 В `pg_hba.conf` доступ к БД `supportdesk` для роли `supportdesk_user` разрешен только с `app`:
 
@@ -161,24 +162,47 @@ admin/Ansible -> db:22 SSH
 
 ## Telegram bot outbound proxy workaround
 
-Для будущего Telegram support bot проверен исходящий доступ с VM `app` к Telegram API через Windows proxy.
+После этапа 18 workaround используется рабочим Telegram bot container на `app`.
 
-Текущий workaround:
+Схема:
 
 ```text
+support-bot container -> 192.168.85.1:10802 -> Windows portproxy -> 127.0.0.1:10801 -> Invisible Man XRay -> Telegram API
+```
+
 Windows portproxy:
+
+```text
 192.168.85.1:10802 -> 127.0.0.1:10801
 ```
 
-Будущий env для `support-bot.service`:
+Env для `/opt/app/.env.bot`:
 
 ```bash
 HTTP_PROXY=http://192.168.85.1:10802
 HTTPS_PROXY=http://192.168.85.1:10802
-NO_PROXY=localhost,127.0.0.1,192.168.85.0/24
+NO_PROXY=localhost,127.0.0.1,192.168.85.0/24,supportdesk-api
 ```
 
-Webhook для Telegram в текущей NAT-инфраструктуре не выбирается. Реалистичный вариант: long polling + outbound proxy.
+`NO_PROXY` важен: запросы `support-bot -> supportdesk-api` должны оставаться внутри Docker/lab-сети и не уходить во внешний proxy.
+
+Webhook не используется. Причина: lab-инфраструктура за NAT и не имеет публичного HTTPS endpoint-а для входящих Telegram webhook-запросов. Выбран long polling: bot сам забирает updates из Telegram API через исходящий proxy.
+
+Видимость:
+
+```text
+Telegram bot глобально доступен как @misis_digital_support_bot внутри Telegram.
+VM app/web/db при этом не публикуются в интернет.
+Входящие соединения из Telegram к lab-сети не нужны.
+```
+
+Docker network на app:
+
+```text
+support-bot -> supportdesk-api идет по Docker Compose network.
+В backend logs direct/via IP для bot-запросов может выглядеть как 172.18.0.x.
+Это внутренний Docker IP контейнера, а не внешний пользователь.
+```
 
 ## Future network/security changes
 
@@ -201,3 +225,30 @@ Future hardening:
 ## VPN issue
 
 При включенном VPNKA/VPN доступ к Proxmox `https://192.168.85.128:8006` с Windows не работает. Практическое решение: для работы с Proxmox локально отключать VPN.
+
+
+### Telegram bot outbound и Docker internal flow
+
+```text
+Telegram user -> Telegram API -> support-bot container -> supportdesk-api container -> PostgreSQL
+```
+
+Telegram bot работает через long polling: входящий публичный webhook не используется, VM не публикуются в интернет. `support-bot` сам ходит наружу к Telegram API через outbound proxy workaround:
+
+```text
+support-bot container -> 192.168.85.1:10802 -> Windows portproxy -> 127.0.0.1:10801 -> Invisible Man XRay -> Telegram API
+```
+
+Внутренний запрос бота к backend API остается внутри Docker Compose network:
+
+```text
+support-bot -> http://supportdesk-api:8080
+```
+
+Поэтому в backend logs для Telegram-flow часто виден `via=172.18.0.x`: это внутренний Docker IP контейнера `support-bot`, а не пользователь и не Telegram server.
+
+Bot metrics доступны Prometheus на:
+
+```text
+monitor/Prometheus -> app 192.168.85.133:8090/metrics
+```
