@@ -252,3 +252,60 @@ Bot metrics доступны Prometheus на:
 ```text
 monitor/Prometheus -> app 192.168.85.133:8090/metrics
 ```
+
+## Security/network hardening access model
+
+Stage 19 changed the practical access model from mostly open lab ports to allowlisted flows.
+
+Implemented firewall model:
+
+```text
+UFW active on web/app/log/monitor/db;
+default incoming deny;
+default outgoing allow;
+admin remains the management source;
+monitor remains the metrics source;
+web remains the user-facing frontend/reverse-proxy source;
+app remains the only normal DB client;
+Docker-published app ports are restricted through DOCKER-USER.
+```
+
+Allowed high-level flows after hardening:
+
+```text
+Windows 192.168.85.1 -> web:80
+Windows 192.168.85.1 -> monitor:3000/9090/9093
+Windows 192.168.85.1 -> admin:22
+admin -> all nodes:22
+web -> app:8080
+monitor -> app:8080/8090/9100
+app -> db:5432
+monitor -> db:9100/9187
+web/app/db -> log:3100
+monitor -> log:3100/9100
+monitor -> web:9080/9100
+```
+
+Explicitly blocked / no longer allowed:
+
+```text
+Windows/browser -> app:8080
+Windows/browser -> app:8090
+web -> db:5432
+web -> monitor:3000/9090/9093
+db -> app:8080/8090
+non-monitor/admin -> exporter ports 9080/9100/9187
+non-Promtail/Grafana/admin -> log:3100
+external/lab nodes -> log:9095
+```
+
+Important note about Docker on `app`:
+
+```text
+UFW alone is not the whole app protection story because Docker-published ports use NAT/FORWARD rules.
+app:8080 and app:8090 are restricted through the DOCKER-USER chain.
+The rules are restored after reboot by app-docker-user-firewall.service.
+```
+
+Nginx HTTP hardening, HTTPS/local CA, static/DHCP-reserved IPs and Proxmox/VLAN-level segmentation are not implemented yet and remain in `12_future_improvements_backlog.md`.
+

@@ -312,3 +312,31 @@ nothing to commit, working tree clean
 
 Важно для admin/Ansible: deployment support-bot пока не автоматизирован отдельной role/playbook. Это задача будущего Ansible automation v2.
 
+## Security/network hardening operational notes
+
+During Stage 19 `admin` was used as the control node for firewall rollout.
+
+New local documentation artifacts created on `admin`:
+
+```text
+~/control-node/docs/security-hardening/01_before_listening_ports.txt
+~/control-node/docs/security-hardening/02_before_firewall_rules.txt
+```
+
+Operational approach:
+
+```text
+one node at a time;
+start with db, then web, log, monitor, app;
+never enable default-deny firewall before adding SSH allow rule from admin;
+verify allowed and denied flows after each node;
+app handled last because Docker-published ports require DOCKER-USER rules.
+```
+
+Admin management access preserved:
+
+```text
+admin -> web/app/log/monitor/db:22 works after hardening;
+ansible-playbook playbooks/check_services.yml passes after hardening.
+```
+
