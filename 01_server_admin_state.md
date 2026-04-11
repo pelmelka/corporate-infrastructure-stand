@@ -308,5 +308,7 @@ nothing to commit, working tree clean
 - первые operational playbook'и;
 - Git repo с первыми commit'ами.
 
-Последний завершенный этап проекта: `DB observability и backups` — db добавлен в Ansible, Prometheus/Grafana/Loki, DB alerts, backup/restore и timer готовы.
+Последний завершенный этап проекта: `Telegram support bot + bot observability` — support-bot реализован вручную на `app` как Docker Compose service, подключен к Loki/Prometheus/Grafana/alerts.
+
+Важно для admin/Ansible: deployment support-bot пока не автоматизирован отдельной role/playbook. Это задача будущего Ansible automation v2.
 

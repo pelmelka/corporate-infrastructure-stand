@@ -655,38 +655,105 @@ ansible-playbook playbooks/check_services.yml проходит: app ok=5, db ok=
 доказывать восстановимость через restore test в отдельную БД.
 ```
 
-## Этап 18. Telegram support bot
+## Этап 18. Telegram support bot + bot observability
 
-Цель: добавить второго клиента к тому же backend API.
+Статус: завершено.
 
-Архитектура:
+Цель: добавить Telegram как второго клиента к тому же backend API и построить минимальную observability вокруг нового bot-container без дублирования уже существующей product observability.
 
-```text
-Browser -> web -> app -> db
-Telegram -> support-bot.service/container -> app -> db
-```
-
-Команды бота:
+Итоговая архитектура клиентских потоков:
 
 ```text
-/start
-/new
-/tickets
-/resolve
+Browser -> web/Nginx -> supportdesk-api -> PostgreSQL
+Telegram user -> Telegram API -> support-bot container -> supportdesk-api -> PostgreSQL
 ```
 
-Бот должен создавать заявки через тот же API v1 и писать `source=telegram`.
+Ключевое решение: Telegram bot не пишет напрямую в PostgreSQL. Он работает как отдельный клиент backend API v1, поэтому вся бизнес-логика остается в `misis-digital-student-support-api`: валидация category/resource/priority/status, запись `tickets`, запись `ticket_events`, product logs и product metrics.
 
-После появления второго канала стоит добавить source dimension:
+Реализовано на `app`:
 
 ```text
-source=web
-source=telegram
-source=api
-supportdesk_tickets_current_by_source{status,category,resource,priority,source}
+Docker Compose service: support-bot
+Container: misis-digital-support-bot
+Bot username: @misis_digital_support_bot
+Bot token: хранится только в /opt/app/.env.bot, в sources не фиксируется
+Runtime: long polling через outbound HTTP(S) proxy
+Metrics endpoint: app:8090/metrics
+Logs: /var/log/bot/support-bot.log
 ```
 
-До Telegram/API-client stage `source` не добавлялся в базовую метрику этапа 13, чтобы не усложнять dashboard без практического импакта.
+Функциональность бота:
+
+```text
+/start      главное меню
+/help       справка
+/new        создание заявки через кнопочный wizard
+/tickets    просмотр active-заявок с пагинацией
+/resolve    закрытие active-заявки с пагинацией
+```
+
+UI-решения:
+
+```text
+кнопочный интерфейс вместо ручного ввода slug-ов;
+category/resource/priority выбираются кнопками;
+описание вводится текстом;
+HTML-разметка + html.escape для безопасного отображения спецсимволов;
+после закрытия заявки бот отдельно показывает: "Создана через" и "Закрыта через";
+active tickets и resolve menu имеют пагинацию;
+whitelist через ALLOWED_TELEGRAM_USER_IDS поддержан, но сейчас сознательно оставлен пустым для demo/lab.
+```
+
+Observability вокруг бота:
+
+```text
+Promtail на app читает /var/log/bot/*.log отдельным job="support-bot";
+Loki stream: {host="app", job="support-bot", service="misis-digital-support-bot"};
+Prometheus scrape job: support-bot -> 192.168.85.133:8090/metrics;
+Grafana row: Telegram Bot Observability;
+Prometheus alerts: SupportBotDown, SupportBotBackendErrors, SupportBotErrorsDetected.
+```
+
+Bot metrics:
+
+```text
+support_bot_info{service,version}
+support_bot_start_time_seconds
+support_bot_actions_total{action}
+support_bot_api_requests_total{method,endpoint,status_code}
+support_bot_api_request_duration_seconds_bucket{method,endpoint,status_code,le}
+support_bot_api_request_duration_seconds_sum{method,endpoint,status_code}
+support_bot_api_request_duration_seconds_count{method,endpoint,status_code}
+support_bot_errors_total{type}
+```
+
+Принцип scope: на этом этапе не добавлялась новая product source-metric вроде `supportdesk_tickets_current_by_source`, потому что продуктовые вопросы уже покрыты существующими panels/alerts по category/resource/priority/age/status. Новый observability-слой отвечает именно на вопросы bot-runtime и bot-as-client:
+
+```text
+бот жив?
+бот используется?
+бот может ходить в backend API?
+какие bot->API endpoint-ы дают ошибки?
+где bot->API latency становится высокой?
+какие действия выполнялись в Telegram UI?
+что видно в bot logs и bot error logs?
+```
+
+Проверено:
+
+```text
+/start, /help, /new, /tickets, /resolve работают;
+созданные из Telegram заявки получают source=telegram;
+ticket_events фиксирует ticket_created/ticket_status_changed с source=telegram;
+бот создает и закрывает заявки через API v1;
+Promtail/Loki получают bot logs отдельным stream-ом;
+token не попадает в bot logs;
+Prometheus видит support-bot target UP;
+SupportBotDown срабатывает при остановке support-bot container;
+SupportBotBackendErrors срабатывает, когда backend выключен и бот получает ошибку при реальном Telegram-действии;
+SupportBotErrorsDetected отделен от backend_error и предназначен для non-backend ошибок бота;
+Grafana показывает Telegram Bot Alerts, Runtime, API dependency/latency, actions, recent logs и error logs.
+```
 
 ## Этап 19. Security/network hardening
 
@@ -745,9 +812,9 @@ Snapshots/контрольные точки в Proxmox
 # Текущий маркер прогресса
 
 ```text
-Последний завершенный этап: Этап 17. DB observability и backups.
-Текущий следующий этап: Этап 18. Telegram support bot.
-Далее: Telegram bot, hardening, Ansible automation v2, final README/demo.
+Последний завершенный этап: Этап 18. Telegram support bot + bot observability.
+Текущий следующий этап: Этап 19. Security/network hardening.
+Далее: hardening, Ansible automation v2, final README/demo.
 ```
 
 ## Текущий прогресс проекта
@@ -755,14 +822,14 @@ Snapshots/контрольные точки в Proxmox
 Важно: прогресс считается относительно расширенного production-like roadmap.
 
 ```text
-Формальная готовность по расширенному roadmap: 17/21 основных этапов завершены ≈ 81%.
+Формальная готовность по расширенному roadmap: 18/21 основных этапов завершены ≈ 86%.
 Готовность core infrastructure lab: 100% по этапам 1–10.
 Admin/Ansible foundation: 100%.
 Product model v2: 100%.
 DB observability и backups: 100%.
-Инженерная готовность по новому production-like scope: 86–90%.
+Инженерная готовность по новому production-like scope: 90–93%.
 Демонстрационная готовность текущего core-проекта: 98–99%.
-Финальная демонстрационная готовность с DB/Bot/Ansible v2: 68–74%.
+Финальная демонстрационная готовность с DB/Bot/Ansible v2: 76–82%.
 ```
 
 Разбивка по этапам:
@@ -786,8 +853,8 @@ DB observability и backups: 100%.
 | 15. Dockerization | завершено | 100% | Backend перенесен в Docker container, порт 8080 и observability flow сохранены, app.service disabled как rollback-вариант. |
 | 16. PostgreSQL migration | завершено | 100% | Создан db, PostgreSQL 17, tickets/ticket_events, миграция из JSON, SQL-native read/write path, app.py cleanup, `/opt/app:/opt/app` volume удален. |
 | 17. DB observability + backups | завершено | 100% | db добавлен в Ansible/Prometheus/Grafana/Loki; postgres_exporter, DB alerts, PostgreSQL logs, pg_dump backup, checksum, restore test и systemd timer готовы. |
-| 18. Telegram support bot | следующий этап | 5–10% | Сетевой workaround проверен, сам bot еще не реализован. |
-| 19. Security/network hardening | план | 5–10% | Есть proxy headers, но ограничения доступа/HTTPS еще впереди. |
+| 18. Telegram support bot + bot observability | завершено | 100% | Telegram bot реализован как Docker Compose service, работает через long polling/proxy, создает/показывает/закрывает заявки через API v1, пишет source=telegram, логи идут в Loki, native /metrics подключены к Prometheus, bot alerts и Grafana row готовы. |
+| 19. Security/network hardening | следующий этап | 5–10% | Есть proxy headers и понимание сетевых потоков, но ограничения доступа/HTTPS еще впереди. |
 | 20. Ansible automation v2 | план | 0–10% | Зависит от дальнейшей формализации deploy. |
 | 21. Final README/demo packaging | план | 25–35% | Sources ведутся, но финальный README/demo/snapshots еще не собраны. |
 

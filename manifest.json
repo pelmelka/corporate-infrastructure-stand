@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "Stage 17 completed: DB observability and backups. PostgreSQL on db is monitored with node_exporter/postgres_exporter, logs are shipped to Loki via Promtail, Grafana has DB panels, DB alerts are deployed, and supportdesk pg_dump backups are automated with restore test proof.",
-  "last_completed_stage": "Stage 17 DB observability and backups: added db to Ansible managed inventory, installed node_exporter/postgres_exporter/Promtail on db, added Prometheus node/postgres targets, Grafana DB panels, DB alerts, PostgreSQL logs in Loki, pg_dump backup with sha256, restore test, and systemd timer.",
-  "current_next_stage": "Stage 18 Telegram support bot: add a Telegram client that creates tickets through the same API v1 with source=telegram, logs to Loki, and later enables source-based product metrics.",
+  "status": "Stage 18 completed and sources rebuilt for handoff: configs cleaned to contain only current state; large runtime code remains in separate app.py and bot.py snapshots.",
+  "last_completed_stage": "Stage 18 Telegram support bot + bot observability: @misis_digital_support_bot runs as support-bot Docker Compose service on app, uses long polling through outbound proxy, calls API v1 with source=telegram, logs to Loki, exports Prometheus metrics on :8090, has SupportBot alerts and Grafana Telegram Bot Observability row.",
+  "current_next_stage": "Stage 19 Security/network hardening: restrict direct access to app:8080, app:8090, db:5432; review firewall rules, HTTPS/local CA, secrets policy and static/DHCP-reserved IPs.",
   "servers": {
     "admin": "192.168.85.129",
     "web": "192.168.85.131",
@@ -44,7 +44,13 @@
       "pg_stat_database_numbackends",
       "pg_settings_max_connections",
       "pg_stat_database_xact_commit",
-      "pg_stat_database_xact_rollback"
+      "pg_stat_database_xact_rollback",
+      "support_bot_info{service,version}",
+      "support_bot_start_time_seconds",
+      "support_bot_actions_total{action}",
+      "support_bot_api_requests_total{method,endpoint,status_code}",
+      "support_bot_api_request_duration_seconds_bucket{method,endpoint,status_code,le}",
+      "support_bot_errors_total{type}"
     ]
   },
   "sources": [
@@ -61,7 +67,9 @@
     "10_interaction_guide.md",
     "11_server_monitor_state.md",
     "12_future_improvements_backlog.md",
-    "13_server_db_state.md"
+    "13_server_db_state.md",
+    "app.py",
+    "bot.py"
   ],
   "runtime": {
     "app_backend": "Docker container on app:8080 via docker compose",
@@ -70,6 +78,29 @@
     "docker_compose": "v5.1.3 on app",
     "legacy_app_service": "app.service disabled, kept for rollback",
     "db_observability": "node_exporter :9100, postgres_exporter :9187, Promtail :9080 on db",
-    "database_backups": "pg_dump -Fc daily via backup-supportdesk.timer at 03:15 MSK, retention 7 days, sha256 checksums, latest.dump symlink, restore test verified"
+    "database_backups": "pg_dump -Fc daily via backup-supportdesk.timer at 03:15 MSK, retention 7 days, sha256 checksums, latest.dump symlink, restore test verified",
+    "telegram_bot": "Docker container on app:8090 metrics, long polling through outbound proxy, API client to supportdesk-api with source=telegram",
+    "bot_logs": "/var/log/bot/support-bot.log shipped to Loki via Promtail job=support-bot",
+    "bot_observability": "Prometheus job support-bot on 192.168.85.133:8090, SupportBotDown/BackendErrors/ErrorsDetected alerts, Grafana Telegram Bot Observability row with alerts/runtime/API dependency/latency/actions/logs panels"
+  },
+  "package_note": "Compact source package: app.py and bot.py are exported separately as large runtime code files. 06_config_files_current.md contains only current small/full config snapshots and dashboard/alert queries; outdated historical config copies and embedded full app.py code were removed.",
+  "handoff_note": "Use 00 for roadmap, 08 for next checklist, 06 for exact current config files/queries, 03/04/05/11/13 for server state, app.py and bot.py for full code snapshots. 06 intentionally avoids historical/stale config variants and does not duplicate full app.py/bot.py code.",
+  "source_map": {
+    "00_project_overview_and_roadmap.md": "roadmap, completed stages, current progress, next stage",
+    "01_server_admin_state.md": "admin/control node, Ansible, SSH, Git state",
+    "02_server_web_state.md": "web/Nginx/frontend state",
+    "03_server_app_state.md": "app server runtime: supportdesk-api container, support-bot container, app logs, API checks",
+    "04_server_log_state.md": "Loki/Promtail/log streams, LogQL, app/bot/db log panels",
+    "05_network_state.md": "IP map, ports, flows, Docker network, Telegram outbound proxy",
+    "06_config_files_current.md": "current configs only: Ansible, Docker Compose, Dockerfiles, env templates, Nginx, Promtail, Prometheus, alert rules, backup timer, Grafana panel queries; no full app.py/bot.py duplication",
+    "07_tool_stack.md": "installed tools, versions, ports, roles",
+    "08_next_steps_checklist.md": "clean checklist of completed work and next tasks",
+    "09_demo_scenarios.md": "demo and verification scenarios",
+    "10_interaction_guide.md": "how to work in future chats, explanation style, latest handoff state",
+    "11_server_monitor_state.md": "Prometheus/Grafana/Alertmanager/metrics/alerts/dashboard state",
+    "12_future_improvements_backlog.md": "future ideas only; no current-state source of truth",
+    "13_server_db_state.md": "PostgreSQL storage, tables, exporters, backups, restore state",
+    "app.py": "full backend code snapshot",
+    "bot.py": "full Telegram support bot code snapshot"
   }
 }

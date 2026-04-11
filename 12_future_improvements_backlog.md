@@ -1,69 +1,120 @@
 # Future improvements backlog
 
-Этот файл хранит идеи будущих улучшений. Он нужен, чтобы не дублировать backlog по разным state/config sources. Текущие фактические состояния серверов фиксируются в server state files, а будущие улучшения — здесь.
+Этот файл хранит только будущие идеи и отложенные улучшения. Фактическое состояние уже реализованных этапов фиксируется в `00_project_overview_and_roadmap.md`, server state files и `06_config_files_current.md`.
 
-## Product observability после этапа 13
+## Security / network hardening
 
-Этап 13 завершен в минимальном production-like scope.
+Следующий крупный этап.
 
-Реализовано сейчас:
-
-```text
-supportdesk_tickets_current{status,category,resource,priority}
-supportdesk_active_ticket_age_seconds_max{category,resource,priority}
-```
-
-Реализованные Grafana panels:
+Идеи:
 
 ```text
-Open tickets by category
-Active tickets by category/resource
-Critical active tickets
-Oldest active ticket age
+ограничить прямой доступ к app:8080 только нужными источниками;
+ограничить app:8090 support-bot metrics только для monitor/Prometheus;
+ограничить db:5432 только для app и admin-maintenance сценариев;
+проверить firewall rules на Debian/Proxmox/lab network;
+добавить Nginx security headers;
+добавить body size limit;
+добавить proxy timeouts;
+добавить rate limiting;
+рассмотреть HTTPS/self-signed cert или local CA;
+сделать DHCP reservation или static IP для всех VM;
+проверить права 600/640 на .env/.env.bot/backup credentials.
 ```
 
-Итоговые product alerts:
+## Secrets management
+
+Сейчас секреты хранятся в `.env` и `.env.bot` на `app`, не фиксируются в sources и исключены через `.dockerignore`. Это приемлемо для lab, но есть что улучшить.
+
+Будущие варианты:
 
 ```text
-SupportDeskApiDown
-SupportDeskTooManyTicketsForResource
-SupportDeskCriticalTicketsOpen
-SupportDeskOldCriticalTicket
+Ansible Vault для DB password и Telegram token;
+systemd EnvironmentFile с ограниченными правами;
+Docker secrets, если будет переход на Swarm/Compose secrets model;
+отдельный secrets handoff process перед demo.
 ```
 
-Старый `TooManyOpenTickets` удален как слишком общий и заменен более точным alert-ом по `category/resource`.
+Перед публичной демонстрацией решить, оставлять ли bot открытым. Если нет — включить:
 
-### Source dimension после Telegram bot / API-client
+```env
+ALLOWED_TELEGRAM_USER_IDS=<allowed_user_id_1>,<allowed_user_id_2>
+```
 
-Пока `source` не добавлялся в базовую метрику, потому что сейчас почти все заявки приходят из `web`. После появления Telegram bot или отдельного API-клиента добавить source dimension:
+## Grafana/dashboard lifecycle
+
+Dashboard сейчас собран вручную в Grafana и описан в sources. Для воспроизводимости позже стоит экспортировать JSON.
+
+Идеи:
 
 ```text
-source=web
-source=telegram
-source=api
+export Infrastructure Overview dashboard JSON;
+хранить JSON в Git/control-node files;
+описать import procedure;
+позже рассмотреть Grafana provisioning.
 ```
 
-Возможная метрика:
+## Ansible automation v2
+
+После ручной стабилизации новой архитектуры стоит автоматизировать deployment и проверки.
+
+Идеи roles/playbooks:
+
+```text
+common.yml
+nginx.yml
+app.yml
+docker_app.yml
+support_bot.yml
+promtail.yml
+prometheus.yml
+prometheus_rules.yml
+postgres.yml
+backup.yml
+grafana_export.yml
+check_services.yml v2
+```
+
+Что автоматизировать в первую очередь:
+
+```text
+deploy /opt/app/app.py and rebuild supportdesk-api image;
+deploy /opt/app/bot.py and rebuild support-bot image;
+deploy Promtail configs for app/db/web;
+deploy Prometheus scrape configs and rules;
+run health checks after deploy;
+backup before risky changes.
+```
+
+## Logging improvements
+
+Текущее состояние:
+
+```text
+app logs: /var/log/app/app.log -> Promtail -> Loki
+bot logs: /var/log/bot/support-bot.log -> Promtail -> Loki
+postgres logs: /var/log/postgresql/*.log -> Promtail -> Loki
+```
+
+Будущие улучшения:
+
+```text
+перейти от file logs к stdout/stderr + container log collector;
+сделать единый structured JSON/logfmt logging guideline;
+разделить App logs dashboard на App activity logs и Ticket change events, если текущая панель станет шумной;
+не выносить resource/ticket_id/user_id в Loki labels без явной необходимости, чтобы не раздувать cardinality.
+```
+
+## Product observability improvements
+
+Текущая product observability уже покрывает active tickets по status/category/resource/priority и age critical tickets. На этапе Telegram bot source-based product metrics сознательно не добавлялись, чтобы не дублировать слой продукта.
+
+Вернуться к source dimension стоит, если появится задача сравнивать каналы `web/api/telegram`.
+
+Возможные метрики:
 
 ```text
 supportdesk_tickets_current_by_source{status,category,resource,priority,source}
-```
-
-Возможные вопросы:
-
-```text
-Сколько active-заявок пришло из web?
-Сколько active-заявок пришло из Telegram?
-Есть ли critical-заявки из Telegram?
-```
-
-### Event-based counters после PostgreSQL / ticket_events
-
-Не добавлять честные counters поверх одного только `tickets.json`: при reopen и отсутствии event history они будут неоднозначны.
-
-После появления PostgreSQL и таблицы `ticket_events` добавить:
-
-```text
 supportdesk_tickets_created_total{category,resource,priority,source}
 supportdesk_tickets_resolved_total{category,resource,priority,source}
 ```
@@ -74,11 +125,14 @@ supportdesk_tickets_resolved_total{category,resource,priority,source}
 SupportDeskTicketSpike
 SupportDeskCreatedOutpacesResolved
 SupportDeskNoResolutionsForActiveBacklog
+SupportDeskTelegramCriticalTicketsOpen
 ```
 
-### Duration/SLA metrics после полноценной event observability
+## SLA / duration metrics
 
-После event storage можно корректно считать время от создания до закрытия:
+После PostgreSQL и `ticket_events` можно корректно считать duration от создания до закрытия. Пока это отложено: уже есть простая метрика age active critical tickets.
+
+Возможные метрики:
 
 ```text
 supportdesk_ticket_resolution_duration_seconds_bucket{category,resource,priority,source,le}
@@ -93,276 +147,42 @@ SupportDeskSlowResolution
 SupportDeskSlaViolationRisk
 ```
 
-Причина отложить: на этапе 13 уже добавлена простая и полезная метрика возраста active-заявки `supportdesk_active_ticket_age_seconds_max`; полноценная SLA-аналитика требует event-based storage.
+## DB observability and backups improvements
 
-## Logging improvements
+Текущее состояние уже готово: postgres_exporter, DB panels, DB alerts, pg_dump backups, checksum, latest symlink, retention 7 days, restore test.
 
-### Оставить category как Loki label
-
-Уже реализовано: Promtail на `app` добавляет `category` как dynamic Loki label.
-
-Текущий подход считается правильным:
+Будущие улучшения:
 
 ```text
-хорошие labels: env, host, job, service, category
-оставить в log fields: resource, ticket_id, client_ip, path, description
+backup freshness alert через textfile collector или custom exporter;
+backup size / last successful backup panel;
+remote storage для dumps;
+weekly/monthly tiered retention;
+automated restore test playbook;
+locks / slow queries / cache hit ratio / WAL/checkpoints panels;
+connection pooling, если backend runtime усложнится.
 ```
 
-`resource` пока не выносить в Loki label, чтобы не увеличивать cardinality без необходимости. Для фильтрации достаточно:
+## Docker/runtime improvements
 
-```logql
-{host="app", job="app", service="misis-digital-student-support-api", category="pay-misis"}
-|= "resource=dorm-payment"
-```
-
-### Возможное улучшение App logs panel
-
-Пока `ticket_list_requested` оставлен в dashboard, потому что он показывает активность UI/API. Если dashboard станет слишком шумным, можно создать две панели:
+Текущее состояние:
 
 ```text
-App activity logs     -> включает ticket_list_requested
-Ticket change events  -> только ticket_created/ticket_status_changed/ticket_status_unchanged
+supportdesk-api container на app:8080;
+support-bot container на app:8090 metrics;
+code живет в Docker images;
+state живет в PostgreSQL;
+file logs пока сохраняются через host volumes.
 ```
 
-### Dashboard JSON export
-
-Экспортировать Grafana dashboard JSON и хранить его в проектных источниках или в `~/control-node/files/grafana/`.
-
-Плюсы:
+Будущие улучшения:
 
 ```text
-можно восстановить dashboard после переустановки Grafana
-можно отслеживать изменения dashboard в Git
-```
-
-## HTTP/request observability
-
-Этап 14 завершен в минимальном production-like scope.
-
-Реализовано:
-
-```text
-supportdesk_http_requests_total{method,route,status_code}
-supportdesk_http_request_duration_seconds_bucket/sum/count{method,route,status_code}
-promtail_custom_nginx_http_responses_total{status_code}
-```
-
-Реализованные alerts:
-
-```text
-SupportDeskHigh5xxRate
-SupportDeskHigh4xxRate
-SupportDeskHighLatency
-Nginx502Spike
-```
-
-Реализованные Grafana panels:
-
-```text
-HTTP/API Health Overview
-API Request Rate by Route
-API Responses by Status Code
-API p95 Latency by Route
-```
-
-Сознательно не добавлялось:
-
-```text
-supportdesk_errors_total
-supportdesk_4xx_total
-supportdesk_5xx_total
-```
-
-Причина: эти сигналы уже считаются через `supportdesk_http_requests_total{status_code=...}`, а дублирующие counters усложняют dashboard и alerts.
-
-Возможные будущие улучшения HTTP/API observability:
-
-```text
-экспортировать Grafana dashboard JSON в Git;
-добавить отдельную Nginx Responses by Status Code panel, если понадобится подробный reverse proxy traffic view;
-после Docker/DB проверить latency thresholds на более реалистичной нагрузке;
-после появления DB добавить latency breakdown для DB-зависимых endpoints.
-```
-
-## Dockerization
-
-Этап 15 завершен в экологичном scope.
-
-Реализовано:
-
-```text
-Dockerize misis-digital-student-support-api на app
-Docker Engine 29.4.3
-Docker Compose v5.1.3
-image misis-digital-student-support-api:local
-container misis-digital-student-support-api
-host 8080 -> container 8080
-```
-
-Не переносилось в Docker на текущем этапе:
-
-```text
-Prometheus
-Grafana
-Loki
-Alertmanager
-Nginx
-node_exporter
-admin
-```
-
-Сохраненные внешние контракты:
-
-```text
-внешний порт app остается 8080
-Nginx продолжает ходить на app:8080
-Prometheus продолжает scrape app:8080/metrics
-Promtail продолжает читать /var/log/app/app.log через volume
-```
-
-Осознанный временный компромисс:
-
-```text
-/opt/app:/opt/app
-```
-
-Причина: текущий файловый storage использует `/opt/app/tickets.json`, временный файл и `os.replace()`. Mount одного файла `tickets.json` ломал POST/PATCH, потому что временный файл и итоговый файл оказывались на разных mount/filesystem слоях. До PostgreSQL этот workaround допустим. После перехода на PostgreSQL volume `/opt/app:/opt/app` нужно убрать.
-
-Будущие Docker improvements:
-
-```text
-Dockerize support-bot позже
-добавить registry/image tags после появления CI/CD или Ansible deploy v2
-перейти с file logs на stdout/stderr + collector после стабилизации Docker/DB
-```
-
-## PostgreSQL / storage
-
-Текущий storage: `/opt/app/tickets.json`.
-
-PostgreSQL нужен не только как более надежное хранилище заявок, но и как основа для будущих event-based counters и SLA/duration metrics.
-
-Будущая таблица `tickets`:
-
-```text
-id
-schema_version
-category
-category_label
-resource
-resource_label
-description
-priority
-status
-source
-created_at
-updated_at
-resolved_at
-```
-
-Рекомендуемая таблица `ticket_events` для counters, duration metrics и audit trail:
-
-```text
-id
-ticket_id
-event
-old_status
-new_status
-source
-created_at
-metadata_json
-```
-
-## DB observability и backups
-
-Этап DB observability и backups реализован.
-
-Сделано:
-
-```text
-node_exporter на db
-postgres_exporter на db
-Prometheus job postgres
-Grafana DB Health / DB Connections / DB Activity / PostgreSQL Important Logs
-alerts PostgreSQLExporterDown / PostgreSQLDown / PostgreSQLTooManyConnections
-PostgreSQL logs -> Promtail -> Loki
-pg_dump -Fc backup
-sha256 checksum
-latest.dump symlink
-restore test в supportdesk_restore_test
-systemd service + timer
-retention 7 days
-```
-
-Будущие улучшения для backup/DB observability:
-
-```text
-экспортировать Grafana dashboard JSON в Git;
-добавить отдельный backup freshness alert после появления метрики/текстового collector-а;
-добавить backup size / last successful backup panel;
-перенести backups на отдельный storage или remote location;
-добавить weekly/monthly tiered retention;
-автоматизировать restore test отдельным playbook-ом;
-добавить более глубокие PostgreSQL panels: locks, slow queries, cache hit ratio, WAL/checkpoints.
-```
-
-## Telegram support bot
-
-Будущий второй клиент к тому же API v1. После его появления появится практический смысл добавлять `source` в product metrics.
-
-Команды:
-
-```text
-/start
-/new
-/tickets
-/resolve
-```
-
-Требования:
-
-```text
-создавать заявки через app API v1
-писать source=telegram
-использовать те же category/resource values
-после стабилизации добавить source dimension в product metrics
-bot token хранить вне Git
-bot logs отправлять в Loki
-```
-
-## Security / hardening
-
-Идеи:
-
-```text
-ограничить прямой доступ к app:8080
-ограничить db:5432 только для app/admin-maintenance
-добавить Nginx security headers
-добавить body size limit
-добавить proxy timeouts
-добавить rate limiting
-добавить HTTPS/self-signed cert или local CA
-секреты хранить вне Git
-права 600 на env-файлы
-DHCP reservation или static IP
-```
-
-## Ansible automation v2
-
-После ручной стабилизации Product model v2 стоит автоматизировать новую архитектуру.
-
-Идеи playbook/roles:
-
-```text
-app.yml                 deploy /opt/app/app.py
-frontend.yml            deploy /var/www/html/index.html
-promtail.yml            deploy promtail config with category label
-prometheus.yml          deploy prometheus config/rules
-grafana.yml             provision dashboard/datasources later
-docker_app.yml          deploy Dockerized app
-postgres.yml            deploy DB
-bot.yml                 deploy Telegram bot
-backup.yml              run DB backup
+registry/image tags после появления CI/CD или Ansible deploy v2;
+healthcheck в docker-compose для supportdesk-api и support-bot;
+restart/rollback procedure через tagged images;
+stdout/stderr logging + collector;
+compose profiles или отдельные compose files для dev/demo.
 ```
 
 ## Final README/demo packaging
@@ -370,44 +190,15 @@ backup.yml              run DB backup
 Что собрать к финалу:
 
 ```text
-архитектура
-IP/порты/сервисы
-data flows
-команды проверки
-LogQL examples
-PromQL examples
-alerts list
-dashboard screenshots
-demo scripts
-troubleshooting scenarios
-backup/restore scenario
-Proxmox snapshots checklist
-```
-
-
-## Реализовано на этапе 16: PostgreSQL-backed storage
-
-Идея переноса storage с `/opt/app/tickets.json` на отдельный PostgreSQL server реализована.
-
-Сделано:
-
-```text
-server db 192.168.85.139;
-PostgreSQL 17;
-database supportdesk;
-tables tickets/ticket_events;
-JSON -> PostgreSQL migration;
-SQL-native GET/POST/PATCH/metrics;
-legacy Python-list helpers removed from app.py.
-```
-
-Остается как future/backlog:
-
-```text
-DB observability: node_exporter/postgres_exporter, Prometheus, Grafana, alerts;
-backup/restore: pg_dump, restore test;
-source-based counters после Telegram/API-client;
-SLA/resolution duration metrics на базе ticket_events;
-секреты БД вне plain .env;
-connection pooling при усложнении backend runtime.
+архитектура и data flows;
+IP/порты/сервисы;
+команды проверки;
+LogQL examples;
+PromQL examples;
+alerts list;
+dashboard screenshots;
+demo scripts;
+troubleshooting scenarios;
+backup/restore scenario;
+Proxmox snapshots checklist.
 ```
