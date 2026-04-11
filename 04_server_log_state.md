@@ -263,3 +263,41 @@ db PostgreSQL log file -> db Promtail -> log/Loki -> Grafana PostgreSQL Importan
 ## Текущий статус
 
 `log` готов как Loki logging server: принимает nginx logs, app product logs, Telegram bot logs и PostgreSQL logs, отдает logs в Grafana, поддерживает фильтрацию app logs по dynamic label `category`, а также отдает системные метрики через node_exporter.
+
+## Security/network hardening
+
+UFW installed and active after Stage 19.
+
+Current policy:
+
+```text
+default incoming: deny
+default outgoing: allow
+routed: disabled
+```
+
+Allowed inbound:
+
+```text
+192.168.85.129 -> 22/tcp     admin SSH/Ansible
+192.168.85.131 -> 3100/tcp   web Promtail -> Loki
+192.168.85.133 -> 3100/tcp   app Promtail -> Loki
+192.168.85.139 -> 3100/tcp   db Promtail -> Loki
+192.168.85.137 -> 3100/tcp   monitor/Grafana Loki datasource
+192.168.85.129 -> 3100/tcp   admin Loki diagnostics
+192.168.85.137 -> 9100/tcp   monitor node_exporter scrape
+192.168.85.129 -> 9100/tcp   admin node_exporter diagnostics
+```
+
+`9095/tcp` Loki gRPC is intentionally not opened to external nodes because current project flows use Loki HTTP API on `3100/tcp`.
+
+Confirmed:
+
+```text
+admin -> log:3100 /ready works;
+web/app/db -> log:3100 works;
+monitor -> log:3100 and log:9100 works;
+external/non-allowed access to log:9095 is blocked;
+Grafana/Loki logs remain available.
+```
+

@@ -473,3 +473,41 @@ Bot error logs
 ```
 
 Ключевые PromQL/LogQL запросы зафиксированы в `06_config_files_current.md`.
+
+## Security/network hardening
+
+UFW installed and active after Stage 19.
+
+Current policy:
+
+```text
+default incoming: deny
+default outgoing: allow
+routed: disabled
+```
+
+Allowed inbound:
+
+```text
+192.168.85.129 -> 22/tcp     admin SSH/Ansible
+192.168.85.1   -> 3000/tcp   Windows Grafana UI
+192.168.85.129 -> 3000/tcp   admin Grafana diagnostics
+192.168.85.1   -> 9090/tcp   Windows Prometheus UI
+192.168.85.129 -> 9090/tcp   admin Prometheus diagnostics
+192.168.85.1   -> 9093/tcp   Windows Alertmanager endpoints/API
+192.168.85.129 -> 9093/tcp   admin Alertmanager diagnostics
+192.168.85.129 -> 9100/tcp   admin node_exporter diagnostics
+```
+
+Prometheus local scrape of monitor node_exporter continues through localhost/loopback. Outgoing scrapes from monitor to web/app/log/db remain allowed by `default allow outgoing`.
+
+Confirmed:
+
+```text
+Grafana/Prometheus/Alertmanager are accessible from Windows 192.168.85.1;
+admin diagnostics works;
+web -> monitor:3000/9090/9093 times out;
+Prometheus /-/ready works;
+Prometheus targets remain UP.
+```
+

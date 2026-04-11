@@ -76,7 +76,7 @@ become = False
 
 ### `admin: ~/control-node/playbooks/check_services.yml`
 
-Актуальный вариант учитывает, что backend и Telegram bot на `app` работают как Docker Compose services, а не как `app.service`.
+Вариант идеала (пока реализован без проверки состояния контейнера с ботом - он учитывает, что backend и Telegram bot на `app` работают как Docker Compose services, а не как `app.service`.
 
 ```yaml
 ---
@@ -198,7 +198,7 @@ become = False
 
 ### `admin: ~/control-node/playbooks/restart_app.yml`
 
-Актуальный смысл: перезапуск backend-контейнера через Docker Compose.
+Актуальный смысл (точно также как с предыдущим, пока не реализовано, сюда как вариант идеала загружен): перезапуск backend-контейнера через Docker Compose.
 
 ```yaml
 ---
@@ -1320,3 +1320,149 @@ up{job="node"}
 {host="web", job="nginx", service="frontend"}
 {host="db", job="postgresql", service="postgresql"}
 ```
+
+## 12. Security/network hardening configs
+
+### UFW policy summary
+
+Applied on:
+
+```text
+web
+app
+log
+monitor
+db
+```
+
+Common baseline:
+
+```text
+Default: deny (incoming), allow (outgoing), disabled (routed)
+Logging: on (low)
+```
+
+### `db` UFW allowlist
+
+```text
+22/tcp     ALLOW IN  192.168.85.129  # admin ssh
+5432/tcp   ALLOW IN  192.168.85.133  # app to postgresql
+5432/tcp   ALLOW IN  192.168.85.129  # admin postgresql maintenance
+9100/tcp   ALLOW IN  192.168.85.137  # monitor node_exporter
+9100/tcp   ALLOW IN  192.168.85.129  # admin node_exporter diagnostics
+9187/tcp   ALLOW IN  192.168.85.137  # monitor postgres_exporter
+9187/tcp   ALLOW IN  192.168.85.129  # admin postgres_exporter diagnostics
+```
+
+### `web` UFW allowlist
+
+```text
+22/tcp     ALLOW IN  192.168.85.129  # admin ssh
+80/tcp     ALLOW IN  192.168.85.1    # windows browser frontend
+80/tcp     ALLOW IN  192.168.85.129  # admin frontend diagnostics
+9080/tcp   ALLOW IN  192.168.85.137  # monitor promtail metrics
+9080/tcp   ALLOW IN  192.168.85.129  # admin promtail metrics diagnostics
+9100/tcp   ALLOW IN  192.168.85.137  # monitor node_exporter
+9100/tcp   ALLOW IN  192.168.85.129  # admin node_exporter diagnostics
+```
+
+### `log` UFW allowlist
+
+```text
+22/tcp     ALLOW IN  192.168.85.129  # admin ssh
+3100/tcp   ALLOW IN  192.168.85.131  # web promtail to loki
+3100/tcp   ALLOW IN  192.168.85.133  # app promtail to loki
+3100/tcp   ALLOW IN  192.168.85.139  # db promtail to loki
+3100/tcp   ALLOW IN  192.168.85.137  # monitor grafana loki datasource
+3100/tcp   ALLOW IN  192.168.85.129  # admin loki diagnostics
+9100/tcp   ALLOW IN  192.168.85.137  # monitor node_exporter
+9100/tcp   ALLOW IN  192.168.85.129  # admin node_exporter diagnostics
+```
+
+`9095/tcp` Loki gRPC is intentionally not opened to external nodes.
+
+### `monitor` UFW allowlist
+
+```text
+22/tcp     ALLOW IN  192.168.85.129  # admin ssh
+3000/tcp   ALLOW IN  192.168.85.1    # windows grafana ui
+3000/tcp   ALLOW IN  192.168.85.129  # admin grafana diagnostics
+9090/tcp   ALLOW IN  192.168.85.1    # windows prometheus ui
+9090/tcp   ALLOW IN  192.168.85.129  # admin prometheus diagnostics
+9093/tcp   ALLOW IN  192.168.85.1    # windows alertmanager
+9093/tcp   ALLOW IN  192.168.85.129  # admin alertmanager diagnostics
+9100/tcp   ALLOW IN  192.168.85.129  # admin node_exporter diagnostics
+```
+
+Prometheus local scrape of monitor node_exporter uses localhost/loopback, so no self-rule for `192.168.85.137 -> 9100` is required.
+
+### `app` UFW allowlist
+
+```text
+22/tcp     ALLOW IN  192.168.85.129  # admin ssh
+8080/tcp   ALLOW IN  192.168.85.131  # web to supportdesk-api
+8080/tcp   ALLOW IN  192.168.85.137  # monitor supportdesk-api metrics
+8080/tcp   ALLOW IN  192.168.85.129  # admin supportdesk-api diagnostics
+8090/tcp   ALLOW IN  192.168.85.137  # monitor support-bot metrics
+8090/tcp   ALLOW IN  192.168.85.129  # admin support-bot metrics diagnostics
+9100/tcp   ALLOW IN  192.168.85.137  # monitor node_exporter
+9100/tcp   ALLOW IN  192.168.85.129  # admin node_exporter diagnostics
+9080/tcp   ALLOW IN  192.168.85.129  # admin promtail metrics diagnostics
+```
+
+### `app: /usr/local/sbin/app-docker-user-firewall.sh`
+
+```sh
+#!/bin/sh
+set -eu
+
+IPTABLES="/usr/sbin/iptables"
+CHAIN="DOCKER-USER"
+EXT_IF="ens18"
+
+WEB_IP="192.168.85.131"
+MONITOR_IP="192.168.85.137"
+ADMIN_IP="192.168.85.129"
+
+$IPTABLES -N "$CHAIN" 2>/dev/null || true
+$IPTABLES -F "$CHAIN"
+
+$IPTABLES -A "$CHAIN" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+$IPTABLES -A "$CHAIN" -i "$EXT_IF" -s "$WEB_IP" -p tcp --dport 8080 -j ACCEPT
+$IPTABLES -A "$CHAIN" -i "$EXT_IF" -s "$MONITOR_IP" -p tcp --dport 8080 -j ACCEPT
+$IPTABLES -A "$CHAIN" -i "$EXT_IF" -s "$ADMIN_IP" -p tcp --dport 8080 -j ACCEPT
+
+$IPTABLES -A "$CHAIN" -i "$EXT_IF" -s "$MONITOR_IP" -p tcp --dport 8090 -j ACCEPT
+$IPTABLES -A "$CHAIN" -i "$EXT_IF" -s "$ADMIN_IP" -p tcp --dport 8090 -j ACCEPT
+
+$IPTABLES -A "$CHAIN" -i "$EXT_IF" -p tcp --dport 8080 -j DROP
+$IPTABLES -A "$CHAIN" -i "$EXT_IF" -p tcp --dport 8090 -j DROP
+
+exit 0
+```
+
+### `app: /etc/systemd/system/app-docker-user-firewall.service`
+
+```ini
+[Unit]
+Description=Apply DOCKER-USER firewall rules for MISIS Digital app
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/app-docker-user-firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Confirmed after reboot:
+
+```text
+systemctl is-enabled app-docker-user-firewall.service -> enabled
+systemctl is-active app-docker-user-firewall.service  -> active
+```
+

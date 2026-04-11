@@ -241,3 +241,40 @@ PGPASSWORD='<redacted>' psql -h 192.168.85.139 -U supportdesk_user -d supportdes
 - добавить DB alerts;
 - настроить `pg_dump` backup;
 - выполнить restore test.
+
+## Security/network hardening
+
+UFW installed and active after Stage 19.
+
+Current policy:
+
+```text
+default incoming: deny
+default outgoing: allow
+routed: disabled
+```
+
+Allowed inbound:
+
+```text
+192.168.85.129 -> 22/tcp     admin SSH/Ansible
+192.168.85.133 -> 5432/tcp   app -> PostgreSQL
+192.168.85.129 -> 5432/tcp   admin PostgreSQL maintenance
+192.168.85.137 -> 9100/tcp   monitor node_exporter scrape
+192.168.85.129 -> 9100/tcp   admin node_exporter diagnostics
+192.168.85.137 -> 9187/tcp   monitor postgres_exporter scrape
+192.168.85.129 -> 9187/tcp   admin postgres_exporter diagnostics
+```
+
+Confirmed:
+
+```text
+app -> db:5432 works;
+admin -> db:22 and db:5432 works;
+monitor -> db:9100/9187 works;
+web -> db:5432 is blocked;
+backend can still read/write PostgreSQL through normal app flow.
+```
+
+Security note: `listen_addresses='*'` remains in PostgreSQL config to avoid DHCP/reboot bind races, but network access is now limited by UFW and authentication is still limited by `pg_hba.conf`.
+

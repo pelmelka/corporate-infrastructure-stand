@@ -248,3 +248,38 @@ prometheus-node-exporter.service
 - nginx logs уходят в Loki;
 - nginx-derived HTTP response metric `promtail_custom_nginx_http_responses_total` доступна на `:9080/metrics` и собирается Prometheus через `promtail-web`;
 - системные метрики доступны Prometheus через node_exporter.
+
+## Security/network hardening
+
+UFW installed and active after Stage 19.
+
+Current policy:
+
+```text
+default incoming: deny
+default outgoing: allow
+routed: disabled
+```
+
+Allowed inbound:
+
+```text
+192.168.85.129 -> 22/tcp     admin SSH/Ansible
+192.168.85.1   -> 80/tcp     Windows/browser frontend
+192.168.85.129 -> 80/tcp     admin frontend diagnostics
+192.168.85.137 -> 9080/tcp   monitor Promtail metrics scrape
+192.168.85.129 -> 9080/tcp   admin Promtail metrics diagnostics
+192.168.85.137 -> 9100/tcp   monitor node_exporter scrape
+192.168.85.129 -> 9100/tcp   admin node_exporter diagnostics
+```
+
+Confirmed:
+
+```text
+Windows/browser -> web:80 works;
+admin -> web:80 works;
+monitor -> web:9080/9100 works;
+app/db/other nodes do not need access to web metrics ports;
+frontend/API path through Nginx remains healthy.
+```
+
