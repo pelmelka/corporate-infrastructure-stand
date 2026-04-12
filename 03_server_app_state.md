@@ -476,3 +476,64 @@ prometheus-node-exporter.service active
 ```
 
 Это соответствует текущей архитектуре: backend работает в Docker container, а не как systemd `app.service`.
+
+## Security/network hardening
+
+UFW installed and active after Stage 19. Docker published ports are additionally restricted through `DOCKER-USER`.
+
+Current UFW policy:
+
+```text
+default incoming: deny
+default outgoing: allow
+routed: disabled
+```
+
+Allowed inbound through UFW:
+
+```text
+192.168.85.129 -> 22/tcp     admin SSH/Ansible
+192.168.85.131 -> 8080/tcp   web/Nginx to supportdesk-api
+192.168.85.137 -> 8080/tcp   Prometheus supportdesk-api metrics
+192.168.85.129 -> 8080/tcp   admin backend diagnostics
+192.168.85.137 -> 8090/tcp   Prometheus support-bot metrics
+192.168.85.129 -> 8090/tcp   admin bot metrics diagnostics
+192.168.85.137 -> 9100/tcp   monitor node_exporter
+192.168.85.129 -> 9100/tcp   admin node_exporter diagnostics
+192.168.85.129 -> 9080/tcp   admin Promtail metrics diagnostics
+```
+
+Docker-specific hardening:
+
+```text
+DOCKER-USER allows web/admin/monitor to app:8080;
+DOCKER-USER allows monitor/admin to app:8090;
+DOCKER-USER drops all other ens18 traffic to 8080/8090;
+Docker-internal support-bot -> supportdesk-api traffic is not blocked because rules match -i ens18.
+```
+
+Persistence:
+
+```text
+/usr/local/sbin/app-docker-user-firewall.sh
+/etc/systemd/system/app-docker-user-firewall.service
+```
+
+Service state after reboot:
+
+```text
+systemctl is-enabled app-docker-user-firewall.service -> enabled
+systemctl is-active app-docker-user-firewall.service  -> active
+```
+
+Confirmed after reboot:
+
+```text
+web -> app:8080 open;
+monitor -> app:8080/8090/9100 open;
+admin -> app:8080/8090 works;
+db -> app:8080/8090 timed out;
+Windows/browser direct access to app:8080/8090 is blocked;
+Browser -> web -> app -> db still works.
+```
+
