@@ -1,9 +1,9 @@
 {
   "project": "Mini Corporate Infrastructure Lab",
   "purpose": "Source files to load into a future custom GPT/project knowledge base",
-  "status": "Stage 18 completed and sources rebuilt for handoff: configs cleaned to contain only current state; large runtime code remains in separate app.py and bot.py snapshots.",
-  "last_completed_stage": "Stage 18 Telegram support bot + bot observability: @misis_digital_support_bot runs as support-bot Docker Compose service on app, uses long polling through outbound proxy, calls API v1 with source=telegram, logs to Loki, exports Prometheus metrics on :8090, has SupportBot alerts and Grafana Telegram Bot Observability row.",
-  "current_next_stage": "Stage 19 Security/network hardening: restrict direct access to app:8080, app:8090, db:5432; review firewall rules, HTTPS/local CA, secrets policy and static/DHCP-reserved IPs.",
+  "status": "Stage 19 completed in baseline firewall/network hardening scope and sources rebuilt for handoff.",
+  "last_completed_stage": "Stage 19 Security/network hardening: UFW active on web/app/log/monitor/db; app Docker published ports 8080/8090 restricted through DOCKER-USER; DOCKER-USER rules persisted by app-docker-user-firewall.service and verified after app reboot.",
+  "current_next_stage": "Stage 20 Ansible automation v2 or final README/demo packaging. Remaining security improvements: Nginx headers/body limits/timeouts/rate limiting, HTTPS/local CA, DHCP reservations/static IPs, Ansible firewall role, stronger secrets management.",
   "servers": {
     "admin": "192.168.85.129",
     "web": "192.168.85.131",
@@ -81,7 +81,8 @@
     "database_backups": "pg_dump -Fc daily via backup-supportdesk.timer at 03:15 MSK, retention 7 days, sha256 checksums, latest.dump symlink, restore test verified",
     "telegram_bot": "Docker container on app:8090 metrics, long polling through outbound proxy, API client to supportdesk-api with source=telegram",
     "bot_logs": "/var/log/bot/support-bot.log shipped to Loki via Promtail job=support-bot",
-    "bot_observability": "Prometheus job support-bot on 192.168.85.133:8090, SupportBotDown/BackendErrors/ErrorsDetected alerts, Grafana Telegram Bot Observability row with alerts/runtime/API dependency/latency/actions/logs panels"
+    "bot_observability": "Prometheus job support-bot on 192.168.85.133:8090, SupportBotDown/BackendErrors/ErrorsDetected alerts, Grafana Telegram Bot Observability row with alerts/runtime/API dependency/latency/actions/logs panels",
+    "security_hardening": "UFW active on web/app/log/monitor/db with default deny incoming/allow outgoing. db:5432 limited to app/admin; app:8080/8090 limited through DOCKER-USER to web/monitor/admin as appropriate; monitor UI limited to Windows/admin; Loki/exporters limited to required sources."
   },
   "package_note": "Compact source package: app.py and bot.py are exported separately as large runtime code files. 06_config_files_current.md contains only current small/full config snapshots and dashboard/alert queries; outdated historical config copies and embedded full app.py code were removed.",
   "handoff_note": "Use 00 for roadmap, 08 for next checklist, 06 for exact current config files/queries, 03/04/05/11/13 for server state, app.py and bot.py for full code snapshots. 06 intentionally avoids historical/stale config variants and does not duplicate full app.py/bot.py code.",

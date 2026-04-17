@@ -308,3 +308,37 @@ backup-supportdesk.timer    OnCalendar=*-*-* 03:15:00, Persistent=true
 ```
 
 Restore test выполнен в отдельную БД `supportdesk_restore_test`; counts `tickets=15`, `ticket_events=18` совпали с рабочей БД, затем test DB удалена.
+
+## Firewall / network access control
+
+### UFW
+
+Used after Stage 19 as the main host firewall on Debian nodes:
+
+```text
+web
+app
+log
+monitor
+db
+```
+
+Baseline policy:
+
+```text
+default deny incoming
+default allow outgoing
+routed disabled
+```
+
+### iptables / DOCKER-USER
+
+Used on `app` to restrict Docker-published ports:
+
+```text
+app:8080 supportdesk-api
+app:8090 support-bot metrics
+```
+
+Reason: Docker published ports are handled through Docker NAT/FORWARD rules, so host UFW alone is not enough for reliable access control. Rules are installed into `DOCKER-USER` and restored after reboot by `app-docker-user-firewall.service`.
+

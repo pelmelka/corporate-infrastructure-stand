@@ -732,3 +732,23 @@ curl -s http://localhost:9090/-/ready
 - `source=telegram` — бизнес-источник действия, а не сетевой IP;
 - `via=172.18.0.x` — Docker internal IP контейнера, а не Telegram user;
 - Prometheus alerts на `increase(...[10m])` могут оставаться active, пока ошибка не выйдет из временного окна.
+
+## 17. Latest handoff after Stage 19
+
+Последний завершенный крупный этап после обновления sources: Stage 19 Security/network hardening в базовом firewall/network scope.
+
+Что считать текущим фактом:
+
+```text
+UFW active on web/app/log/monitor/db;
+default incoming deny, default outgoing allow;
+admin management access preserved;
+direct app:8080/app:8090 blocked for ordinary clients;
+app Docker published ports protected by DOCKER-USER;
+app-docker-user-firewall.service enabled/active and verified after reboot;
+Browser -> web -> app -> db still works;
+Nginx hardening/HTTPS/static IP/secrets improvements remain backlog.
+```
+
+При продолжении проекта следующий логичный шаг: Ansible automation v2 / final README-demo packaging. Если пользователь возвращается к security, сначала не менять правила, а проверить текущие UFW statuses and DOCKER-USER chain.
+

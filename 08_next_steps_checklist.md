@@ -4,9 +4,9 @@
 
 ## Текущий статус
 
-Последний завершенный этап: **Этап 18. Telegram support bot + bot observability**.
+Последний завершенный этап: **Этап 19. Security/network hardening в базовом firewall/network scope**.
 
-Текущий следующий крупный этап: **Этап 19. Security/network hardening**.
+Текущий следующий крупный этап: **Этап 20. Ansible automation v2** или **final README/demo packaging**. Nginx/HTTPS/static IP/secrets improvements оставлены в backlog.
 
 Текущая архитектура продукта:
 
@@ -137,18 +137,34 @@ app/bot/db/node metrics -> Prometheus -> Grafana/Alertmanager
 - [x] `SupportBotErrorsDetected` исключает `backend_error`, чтобы не дублировать backend dependency alert.
 - [x] Grafana row `Telegram Bot Observability` добавлен: alerts, runtime, API dependency, latency by endpoint, requests by endpoint/status, actions, recent logs, error logs.
 
-## Следующий крупный этап: Security/network hardening
+## Завершено: Security/network hardening
 
-- [ ] Ограничить прямой доступ к `app:8080` и `app:8090`, оставив нужные пути для `web`, `monitor` и troubleshooting.
-- [ ] Ограничить доступ к `db:5432` только для `app` и admin-maintenance сценариев.
-- [ ] Продумать firewall rules на уровне Debian/Proxmox/lab network.
-- [ ] Рассмотреть HTTPS/self-signed cert или local CA на `web`.
-- [ ] Причесать секреты: `.env`, `.env.bot`, DB password, backup credentials.
-- [ ] Сделать DHCP reservation или static IP для стабильности targets/inventory/proxy configs.
+- [x] Составлена полная карта сетевых потоков и access matrix.
+- [x] UFW установлен и включен на `db`, `web`, `log`, `monitor`, `app`.
+- [x] На hardened-узлах применена модель `default deny incoming`, `default allow outgoing`.
+- [x] `admin` сохранил SSH/Ansible-доступ ко всем узлам.
+- [x] `db:5432` доступен только `app` и `admin`.
+- [x] `db:9100` и `db:9187` доступны только `monitor` и `admin`.
+- [x] `web:80` оставлен для Windows/browser и admin diagnostics.
+- [x] `web:9080` и `web:9100` доступны только `monitor` и `admin`.
+- [x] `log:3100` доступен только `web`, `app`, `db`, `monitor`, `admin`.
+- [x] `log:9095` не открыт внешним узлам.
+- [x] `monitor:3000`, `monitor:9090`, `monitor:9093` доступны только Windows host `192.168.85.1` и `admin`.
+- [x] Лишний доступ `web -> monitor:3000/9090/9093` закрыт.
+- [x] `app` host-порты защищены UFW.
+- [x] Docker published ports `app:8080` и `app:8090` ограничены через `DOCKER-USER`.
+- [x] `web -> app:8080`, `monitor -> app:8080/8090/9100`, `admin -> app:8080/8090` работают.
+- [x] `db -> app:8080/8090` и Windows/browser direct access к `app:8080/8090` закрыты.
+- [x] Создан `/usr/local/sbin/app-docker-user-firewall.sh` на `app`.
+- [x] Создан и включен `app-docker-user-firewall.service` на `app`.
+- [x] После reboot `app` подтверждено: `app-docker-user-firewall.service enabled/active`, allow/deny правила сохраняются.
+- [x] End-to-end путь `Browser -> web -> app -> db` работает после hardening.
+- [x] Prometheus targets и Grafana/Loki observability не сломаны.
 
-## Далее после hardening
 
-- [ ] Ansible automation v2 для Docker app, support-bot, Prometheus rules, Promtail configs, PostgreSQL/backup checks.
+## Далее после Security/network hardening
+
+- [ ] Ansible automation v2 для Docker app, support-bot, firewall rules, Prometheus rules, Promtail configs, PostgreSQL/backup checks.
 - [ ] Финальный README/demo package.
 - [ ] Export Grafana dashboard JSON в Git/sources.
 - [ ] Proxmox snapshots checklist.

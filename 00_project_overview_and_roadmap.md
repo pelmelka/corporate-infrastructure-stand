@@ -2,7 +2,7 @@
 
 ## Цель проекта
 
-Собрать учебный, но production-like pet-project в формате мини-инфраструктуры корпоративного типа на базе Proxmox VE внутри VMware: frontend, backend, централизованное логирование, мониторинг, alerting, базовая автоматизация, дальнейшая контейнеризация, БД, Telegram-клиент и демонстрационные сценарии troubleshooting.
+Собрать учебный, но production-like pet-project в формате мини-инфраструктуры корпоративного типа на базе Proxmox VE внутри VMware: frontend, backend, централизованное логирование, мониторинг, alerting, автоматизация, контейнеризация, БД, Telegram-клиент и демонстрационные сценарии troubleshooting.
 
 Итоговая ценность проекта: показать Linux administration, DevOps-подход, systemd, SSH, Ansible, Nginx, Python-сервис, Loki/Promtail, Prometheus/Grafana/Alertmanager, node_exporter, reverse proxy, product metrics, alerts, Docker, PostgreSQL, backup/restore и диагностику end-to-end.
 
@@ -121,7 +121,7 @@ Frontend / Nginx server. Сейчас отдает страницу `MISIS_Digit
 
 ## app
 
-Backend/application node. Сейчас Python-приложение работает как Docker container `misis-digital-student-support-api`: `/v1/health`, `/v1/support-model`, `/v1/tickets`, `/v1/tickets/all`, `/v1/tickets/<id>`, `/v1/tickets/<id>/status`, `/metrics`. Заявки хранятся в PostgreSQL на `db`; product logs пишутся в `/var/log/app/app.log`; app logs отправляются в Loki через Promtail; product metrics и HTTP/API request metrics собираются Prometheus.
+Backend/application node. Сейчас Python-приложение работает как Docker container `misis-digital-student-support-api`: `/v1/health`, `/v1/support-model`, `/v1/tickets`, `/v1/tickets/all`, `/v1/tickets/<id>`, `/v1/tickets/<id>/status`, `/metrics`. Заявки хранятся в PostgreSQL на `db`; product logs пишутся в `/var/log/app/app.log`; app logs отправляются в Loki через Promtail; product metrics и HTTP/API request metrics собираются Prometheus. Также запущен и полностью реализован телеграмм-бот через docker контейнер (подробности в 03_server_app_state)
 
 ## db
 
@@ -655,9 +655,9 @@ ansible-playbook playbooks/check_services.yml проходит: app ok=5, db ok=
 доказывать восстановимость через restore test в отдельную БД.
 ```
 
-## Этап 18. Telegram support bot + bot observability
+## Этап 18. Telegram support bot + bot observability - завершено
 
-Статус: завершено.
+
 
 Цель: добавить Telegram как второго клиента к тому же backend API и построить минимальную observability вокруг нового bot-container без дублирования уже существующей product observability.
 
@@ -755,20 +755,80 @@ SupportBotErrorsDetected отделен от backend_error и предназна
 Grafana показывает Telegram Bot Alerts, Runtime, API dependency/latency, actions, recent logs и error logs.
 ```
 
-## Этап 19. Security/network hardening
+## Этап 19. Security/network hardening — завершено в базовом firewall/network scope
 
-Цель: приблизить сетевую модель к production-like варианту.
+Цель: приблизить сетевую модель к production-like варианту: оставить только нужные сетевые потоки, убрать прямой доступ к внутренним сервисам и сохранить управляемость через `admin`.
 
-Что сделать:
+Сделано:
 
 ```text
-ограничить прямой доступ к app:8080
-ограничить db:5432
-Nginx hardening
-HTTPS/self-signed cert или local CA
-секреты вне Git
-DHCP reservation или static IP
+составлена полная карта сетевых потоков и access matrix;
+UFW установлен и включен на web/app/log/monitor/db;
+на всех hardened-узлах выставлено default deny incoming + default allow outgoing;
+admin сохранил SSH/Ansible management access ко всем узлам;
+web оставлен как основная пользовательская входная точка на :80;
+web metrics ports 9080/9100 доступны только monitor/admin;
+db:5432 доступен только app и admin;
+db exporters 9100/9187 доступны только monitor/admin;
+log:3100 доступен только web/app/db/monitor/admin;
+log:9095 не открыт внешним узлам;
+monitor UI 3000/9090/9093 доступен только Windows host 192.168.85.1 и admin;
+app обычные host-порты защищены через UFW;
+app Docker published ports 8080/8090 ограничены через DOCKER-USER;
+DOCKER-USER rules вынесены в /usr/local/sbin/app-docker-user-firewall.sh;
+создан и включен systemd oneshot service app-docker-user-firewall.service;
+после reboot app подтверждено, что service enabled/active и правила сохраняются;
+проверены allowed/denied flows и end-to-end путь Browser -> web -> app -> db.
 ```
+
+Итоговая модель доступа:
+
+```text
+Windows/browser -> web:80                         allowed
+Windows/browser -> app:8080/app:8090              denied
+Windows/browser -> monitor:3000/9090/9093         allowed for lab UI
+admin -> all nodes:22                             allowed
+web -> app:8080                                   allowed
+monitor -> app:8080/8090/9100                     allowed
+app -> db:5432                                    allowed
+db/web/лишние узлы -> app:8080/8090               denied
+web -> db:5432                                    denied
+web/app/db -> log:3100                            allowed
+monitor -> log:3100 and exporters                 allowed
+```
+
+Проверено:
+
+```text
+app -> db:5432 работает;
+web -> db:5432 закрыт;
+web -> app:8080 работает;
+monitor -> app:8080/8090/9100 работает;
+db -> app:8080/8090 закрыт;
+Windows -> app:8080/8090 закрыт;
+Windows -> web:80 работает;
+Grafana/Prometheus/Alertmanager доступны с Windows 192.168.85.1;
+web -> monitor UI ports 3000/9090/9093 закрыт;
+Loki /ready доступен с admin/monitor, logs продолжают работать;
+Prometheus targets после hardening остаются UP;
+ansible-playbook playbooks/check_services.yml проходит без ошибок.
+```
+
+Осознанно оставлено в future improvements:
+
+```text
+Nginx security headers;
+client_max_body_size;
+proxy timeouts;
+rate limiting;
+HTTPS/self-signed cert или local CA;
+DHCP reservation/static IP для всех VM;
+Ansible firewall role/playbook;
+строгий secrets management через Ansible Vault/Docker secrets;
+полный outbound filtering;
+Proxmox firewall/VLAN/отдельные подсети.
+```
+
 
 ## Этап 20. Ansible automation v2
 
@@ -812,9 +872,9 @@ Snapshots/контрольные точки в Proxmox
 # Текущий маркер прогресса
 
 ```text
-Последний завершенный этап: Этап 18. Telegram support bot + bot observability.
-Текущий следующий этап: Этап 19. Security/network hardening.
-Далее: hardening, Ansible automation v2, final README/demo.
+Последний завершенный этап: Этап 19. Security/network hardening в базовом firewall/network scope.
+Текущий следующий этап: Этап 20. Ansible automation v2 или финальная README/demo packaging.
+Далее: Ansible automation v2, final README/demo; Nginx/HTTPS/static IP/secrets improvements оставлены в backlog.
 ```
 
 ## Текущий прогресс проекта
@@ -822,14 +882,14 @@ Snapshots/контрольные точки в Proxmox
 Важно: прогресс считается относительно расширенного production-like roadmap.
 
 ```text
-Формальная готовность по расширенному roadmap: 18/21 основных этапов завершены ≈ 86%.
+Формальная готовность по расширенному roadmap: 19/21 основных этапов завершены ≈ 90%.
 Готовность core infrastructure lab: 100% по этапам 1–10.
 Admin/Ansible foundation: 100%.
 Product model v2: 100%.
 DB observability и backups: 100%.
-Инженерная готовность по новому production-like scope: 90–93%.
+Инженерная готовность по новому production-like scope: 93–95%.
 Демонстрационная готовность текущего core-проекта: 98–99%.
-Финальная демонстрационная готовность с DB/Bot/Ansible v2: 76–82%.
+Финальная демонстрационная готовность с DB/Bot/Ansible v2: 82–86%.
 ```
 
 Разбивка по этапам:
@@ -854,7 +914,7 @@ DB observability и backups: 100%.
 | 16. PostgreSQL migration | завершено | 100% | Создан db, PostgreSQL 17, tickets/ticket_events, миграция из JSON, SQL-native read/write path, app.py cleanup, `/opt/app:/opt/app` volume удален. |
 | 17. DB observability + backups | завершено | 100% | db добавлен в Ansible/Prometheus/Grafana/Loki; postgres_exporter, DB alerts, PostgreSQL logs, pg_dump backup, checksum, restore test и systemd timer готовы. |
 | 18. Telegram support bot + bot observability | завершено | 100% | Telegram bot реализован как Docker Compose service, работает через long polling/proxy, создает/показывает/закрывает заявки через API v1, пишет source=telegram, логи идут в Loki, native /metrics подключены к Prometheus, bot alerts и Grafana row готовы. |
-| 19. Security/network hardening | следующий этап | 5–10% | Есть proxy headers и понимание сетевых потоков, но ограничения доступа/HTTPS еще впереди. |
+| 19. Security/network hardening | завершено в firewall/network scope | 100% базового scope | UFW на web/app/log/monitor/db; app Docker ports закрыты через DOCKER-USER + systemd persistence; Nginx/HTTPS/static IP/secrets оставлены в backlog. |
 | 20. Ansible automation v2 | план | 0–10% | Зависит от дальнейшей формализации deploy. |
 | 21. Final README/demo packaging | план | 25–35% | Sources ведутся, но финальный README/demo/snapshots еще не собраны. |
 

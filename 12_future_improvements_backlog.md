@@ -2,25 +2,34 @@
 
 Этот файл хранит только будущие идеи и отложенные улучшения. Фактическое состояние уже реализованных этапов фиксируется в `00_project_overview_and_roadmap.md`, server state files и `06_config_files_current.md`.
 
-## Security / network hardening
+## Security / network hardening follow-ups
 
-Следующий крупный этап.
+Базовый firewall/network hardening завершен на этапе 19: UFW включен на `web/app/log/monitor/db`, внутренние порты ограничены allowlist-правилами, а Docker published ports `app:8080` и `app:8090` защищены через `DOCKER-USER` + systemd persistence.
 
-Идеи:
+Оставшиеся идеи:
 
 ```text
-ограничить прямой доступ к app:8080 только нужными источниками;
-ограничить app:8090 support-bot metrics только для monitor/Prometheus;
-ограничить db:5432 только для app и admin-maintenance сценариев;
-проверить firewall rules на Debian/Proxmox/lab network;
 добавить Nginx security headers;
-добавить body size limit;
-добавить proxy timeouts;
-добавить rate limiting;
+добавить client_max_body_size;
+добавить proxy_connect_timeout / proxy_send_timeout / proxy_read_timeout;
+добавить rate limiting для /api/;
 рассмотреть HTTPS/self-signed cert или local CA;
 сделать DHCP reservation или static IP для всех VM;
-проверить права 600/640 на .env/.env.bot/backup credentials.
+автоматизировать firewall rules через Ansible role/playbook;
+проверить и формализовать права 600/640 на .env/.env.bot/backup credentials;
+рассмотреть полный outbound filtering отдельным этапом;
+рассмотреть Proxmox firewall, VLAN или отдельные подсети.
 ```
+
+Не делать без отдельного плана:
+
+```text
+массовое изменение firewall rules на всех узлах за один запуск;
+закрытие outbound по умолчанию;
+публикация web в интернет без отдельного HTTPS/access-control плана;
+изменение Docker Compose port bindings без проверки web/monitor/admin flows.
+```
+
 
 ## Secrets management
 
