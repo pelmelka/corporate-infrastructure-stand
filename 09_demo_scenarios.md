@@ -943,3 +943,79 @@ log:     ok=2 failed=0
 monitor: ok=4 failed=0
 web:     ok=3 failed=0
 ```
+
+## Сценарий 19. Security/network hardening access checks
+
+Цель: показать, что после hardening внутренние сервисы доступны только нужным источникам, а нормальный пользовательский путь не сломан.
+
+Проверки с `admin`:
+
+```bash
+cd ~/control-node
+
+# allowed: web -> app backend
+ansible web_nodes -m shell -a "nc -vzn 192.168.85.133 8080"
+
+# allowed: monitor -> app metrics
+ansible monitor_nodes -m shell -a "nc -vzn 192.168.85.133 8080; nc -vzn 192.168.85.133 8090; nc -vzn 192.168.85.133 9100"
+
+# denied: db -> app direct backend/bot metrics
+ansible db_nodes -m shell -a "nc -vzn -w 3 192.168.85.133 8080 || true; nc -vzn -w 3 192.168.85.133 8090 || true"
+
+# denied: web -> db PostgreSQL
+ansible web_nodes -m shell -a "nc -vzn -w 3 192.168.85.139 5432 || true"
+
+# denied: web -> monitor UI ports
+ansible web_nodes -m shell -a "nc -vzn -w 3 192.168.85.137 3000 || true; nc -vzn -w 3 192.168.85.137 9090 || true; nc -vzn -w 3 192.168.85.137 9093 || true"
+```
+
+Expected:
+
+```text
+web -> app:8080 open;
+monitor -> app:8080/8090/9100 open;
+db -> app:8080/8090 timeout;
+web -> db:5432 timeout;
+web -> monitor:3000/9090/9093 timeout.
+```
+
+User-facing path must still work:
+
+```bash
+curl -s http://192.168.85.131/api/v1/health | python3 -m json.tool
+curl -s http://192.168.85.131/api/v1/tickets | python3 -m json.tool | head
+```
+
+Expected:
+
+```text
+Browser -> web -> app -> db works;
+direct Windows/browser access to app:8080 and app:8090 does not work;
+Windows/browser access to web:80 still works;
+Grafana/Prometheus/Alertmanager remain accessible from Windows 192.168.85.1.
+```
+
+## Сценарий 20. DOCKER-USER persistence after app reboot
+
+Цель: показать, что Docker firewall rules на `app` переживают reboot.
+
+Проверка:
+
+```bash
+cd ~/control-node
+
+ansible app_nodes -b -K -m shell -a '
+systemctl is-enabled app-docker-user-firewall.service
+systemctl is-active app-docker-user-firewall.service
+iptables -S DOCKER-USER
+'
+```
+
+Expected:
+
+```text
+app-docker-user-firewall.service -> enabled
+app-docker-user-firewall.service -> active
+DOCKER-USER contains allow rules for web/monitor/admin and DROP rules for other ens18 traffic to 8080/8090.
+```
+
