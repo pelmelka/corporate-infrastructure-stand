@@ -51,6 +51,7 @@ ansible_python_interpreter=/usr/bin/python3
 
 ```ini
 [defaults]
+roles_path = ./roles
 inventory = inventory/hosts.ini
 remote_user = pelmel
 host_key_checking = False
@@ -957,7 +958,7 @@ ARGS="--cluster.listen-address="
 #!/usr/bin/env bash
 set -euo pipefail
 
-BACKUP_DIR="/var/backups/supportdesk"
+BACKUP_DIR="/var/backups/postgresql/supportdesk"
 RETENTION_DAYS="7"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/supportdesk-${TIMESTAMP}.dump"
@@ -1466,3 +1467,113 @@ systemctl is-enabled app-docker-user-firewall.service -> enabled
 systemctl is-active app-docker-user-firewall.service  -> active
 ```
 
+
+
+## 13. Ansible automation v2 source-of-truth
+
+Этап Ansible automation v2 зафиксирован в Git:
+
+```text
+03ae409 Add Ansible automation v2 roles and audit playbooks
+```
+
+### `admin: ~/control-node/ansible.cfg`
+
+```ini
+[defaults]
+roles_path = ./roles
+inventory = inventory/hosts.ini
+remote_user = pelmel
+host_key_checking = False
+interpreter_python = /usr/bin/python3
+retry_files_enabled = False
+
+[privilege_escalation]
+become = False
+```
+
+### `admin: ~/control-node/inventory/group_vars/`
+
+```text
+all.yml             common project variables: IPs, ports, service names, URLs
+web_nodes.yml       Nginx/frontend/reverse proxy and web Promtail variables
+app_nodes.yml       Docker Compose project, supportdesk-api, support-bot, log paths
+db_nodes.yml        PostgreSQL cluster, postgres_exporter, backup, db Promtail variables
+log_nodes.yml       Loki variables
+monitor_nodes.yml   Prometheus/Grafana/Alertmanager variables and expected Prometheus jobs
+```
+
+Important values:
+
+```yaml
+postgres_exporter_service_name: "prometheus-postgres-exporter.service"
+backup_dir: "/var/backups/postgresql/supportdesk"
+backup_latest_dump_path: "/var/backups/postgresql/supportdesk/latest.dump"
+prometheus_expected_jobs:
+  - prometheus
+  - node
+  - supportdesk-api
+  - support-bot
+  - promtail-web
+  - postgres
+```
+
+### Roles
+
+```text
+common                  baseline packages/directories and become check
+node_exporter           install/start/check node_exporter
+app_compose_project     validate /opt/app, env files and app/bot log permissions
+docker_compose_service  reusable deploy/rebuild/check for one compose service
+nginx_frontend          deploy Nginx site config + index.html, nginx -t, reload, checks
+promtail                deploy node-specific Promtail config and restart/check service
+prometheus              deploy prometheus.yml and rules with promtool validation
+postgres_exporter       install/start/check prometheus-postgres-exporter
+postgres_backup         deploy backup script/systemd units/timer and provide manual run tasks
+```
+
+### Playbooks
+
+```text
+apply_baseline.yml              common + node_exporter for managed nodes
+check.yml                       full health check for all nodes and public app path
+check_app_compose_project.yml   validate app Docker Compose project
+ deploy_app.yml                 deploy supportdesk-api via docker_compose_service
+ deploy_bot.yml                 deploy support-bot via docker_compose_service
+ deploy_nginx_frontend.yml      deploy/check web Nginx frontend and reverse proxy
+ deploy_promtail.yml            deploy/check Promtail configs on web/app/db
+ deploy_prometheus.yml          deploy/check Prometheus config/rules/targets
+ deploy_postgres_exporter.yml   deploy/check postgres_exporter on db
+ deploy_postgres_backup.yml     deploy/check backup script/service/timer on db
+ run_db_backup.yml              manual backup run using postgres_backup tasks_from=run_backup
+ network_audit.yml              audit-only network/firewall/Docker/connectivity reports
+```
+
+### Managed file ownership policy
+
+```text
+/opt/app code/config files              root:root 0644
+/opt/app/.env, /opt/app/.env.bot        root:root 0600
+/var/log/app, /var/log/bot              pelmel:adm 2750
+/var/log/app/app.log                    pelmel:adm 0640
+/var/log/bot/support-bot.log            pelmel:adm 0640
+/etc/promtail/config.yml                root:promtail 0640
+/usr/local/sbin/backup_supportdesk.sh   root:postgres 0750
+/etc/systemd/system/backup-*.{service,timer} root:root 0644
+```
+
+### Network audit artifacts
+
+```text
+docs/network-audit/latest/admin-network-audit.txt
+docs/network-audit/latest/web-network-audit.txt
+docs/network-audit/latest/app-network-audit.txt
+docs/network-audit/latest/db-network-audit.txt
+docs/network-audit/latest/log-network-audit.txt
+docs/network-audit/latest/monitor-network-audit.txt
+docs/network-audit/latest/admin-critical-connectivity.txt
+```
+
+Timestamped directories `docs/network-audit/20*/` are ignored by Git. `latest/` is kept as the current audit snapshot.
+
+Firewall changes are intentionally not applied by Ansible. The project uses Ansible for audit/reporting and critical flow validation; firewall rule changes remain manual-review based.

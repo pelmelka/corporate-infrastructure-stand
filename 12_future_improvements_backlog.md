@@ -63,37 +63,21 @@ export Infrastructure Overview dashboard JSON;
 позже рассмотреть Grafana provisioning.
 ```
 
-## Ansible automation v2
+## Ansible automation v2 follow-ups
 
-После ручной стабилизации новой архитектуры стоит автоматизировать deployment и проверки.
-
-Идеи roles/playbooks:
+Stage 20 Ansible automation v2 is completed. Remaining optional improvements:
 
 ```text
-common.yml
-nginx.yml
-app.yml
-docker_app.yml
-support_bot.yml
-promtail.yml
-prometheus.yml
-prometheus_rules.yml
-postgres.yml
-backup.yml
-grafana_export.yml
-check_services.yml v2
+Ansible Vault for secrets instead of manual .env handling;
+CI lint/syntax-check for playbooks;
+ansible-lint adoption;
+Molecule-style role tests if project grows;
+Grafana dashboard provisioning/export through Ansible;
+Loki role if we want full logging stack config management;
+firewall apply role only if out-of-band access, rollback plan and serial validation are added.
 ```
 
-Что автоматизировать в первую очередь:
-
-```text
-deploy /opt/app/app.py and rebuild supportdesk-api image;
-deploy /opt/app/bot.py and rebuild support-bot image;
-deploy Promtail configs for app/db/web;
-deploy Prometheus scrape configs and rules;
-run health checks after deploy;
-backup before risky changes.
-```
+Current decision: firewall changes are intentionally not automated; `network_audit.yml` provides audit/reporting and critical flow validation.
 
 ## Logging improvements
 

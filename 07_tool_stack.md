@@ -24,28 +24,24 @@ SSH работает на узлах. Пользователь `pelmel` имее
 
 ### Ansible
 
-Установлен на `admin`; `admin` является базовым control node.
-
-Текущая структура:
+Ansible используется на `admin` как основной automation/control слой.
 
 ```text
-~/control-node/
-├── ansible.cfg
-├── inventory/hosts.ini
-├── playbooks/
-├── files/
-├── roles/
-├── templates/
-└── docs/
+Ansible core: 2.19.4
+config: /home/pelmel/control-node/ansible.cfg
+inventory: inventory/hosts.ini
+roles_path: ./roles
 ```
 
-Реализовано:
+Stage 20 Ansible automation v2 добавил:
 
-- inventory с `control`, `web_nodes`, `app_nodes`, `log_nodes`, `monitor_nodes`, `db_nodes`, `managed`;
-- `ansible all -m ping` и `ansible managed -m ping` для текущих managed nodes;
-- `ping_all.yml`, `check_services.yml`, `restart_app.yml`, `deploy_prometheus_rules.yml`.
+```text
+inventory/group_vars for all role groups;
+roles for common baseline, node_exporter, app compose project, compose service deploy, nginx frontend, promtail, prometheus, postgres_exporter, postgres_backup;
+playbooks for baseline, deploy app/bot/nginx/promtail/prometheus/postgres_exporter/postgres_backup, manual DB backup, network audit, full check.
+```
 
-После этапа 17 `check_services.yml` обновлен под Dockerized app и DB services: `docker.service`, API health/metrics endpoints, PostgreSQL cluster, exporters, Promtail и backup timer.
+Firewall changes are intentionally not managed by Ansible. `network_audit.yml` is audit-only and creates reports under `docs/network-audit/latest/`.
 
 ### Git
 
@@ -342,3 +338,19 @@ app:8090 support-bot metrics
 
 Reason: Docker published ports are handled through Docker NAT/FORWARD rules, so host UFW alone is not enough for reliable access control. Rules are installed into `DOCKER-USER` and restored after reboot by `app-docker-user-firewall.service`.
 
+
+
+## Ansible automation v2 tooling notes
+
+Ключевые production-like приемы, закрепленные в Stage 20:
+
+```text
+validate: promtool check config/rules для Prometheus;
+nginx -t перед reload Nginx;
+handlers для restart/reload только при changed;
+no_log для env/secrets checks;
+delegate_to: localhost для проверки source-файлов на control node;
+stat follow=true для latest.dump symlink;
+JSON parsing targets API вместо поиска строки в Prometheus response;
+network_audit.yml как audit-only playbook без firewall auto-apply.
+```

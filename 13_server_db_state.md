@@ -278,3 +278,47 @@ backend can still read/write PostgreSQL through normal app flow.
 
 Security note: `listen_addresses='*'` remains in PostgreSQL config to avoid DHCP/reboot bind races, but network access is now limited by UFW and authentication is still limited by `pg_hba.conf`.
 
+
+
+## Ansible automation v2 management
+
+После Stage 20 `db` управляется следующими Ansible ролями/playbook-ами:
+
+```text
+common
+node_exporter
+postgres_exporter
+postgres_backup
+promtail
+check.yml
+network_audit.yml
+```
+
+`postgres_exporter` role использует реальный Debian unit:
+
+```text
+prometheus-postgres-exporter.service
+```
+
+`postgres_backup` role управляет:
+
+```text
+/usr/local/sbin/backup_supportdesk.sh -> root:postgres 0750
+/etc/systemd/system/backup-supportdesk.service -> root:root 0644
+/etc/systemd/system/backup-supportdesk.timer -> root:root 0644
+/var/backups/postgresql/supportdesk -> postgres:postgres 0750
+```
+
+`latest.dump` является symlink и проверяется через `stat follow=true`. Ручной backup запускается `playbooks/run_db_backup.yml` через `include_role tasks_from=run_backup`.
+
+Подтверждено:
+
+```text
+latest.dump path: /var/backups/postgresql/supportdesk/latest.dump
+latest.dump size: 10126 bytes
+checksum files found: 6
+```
+
+`promtail` деплоит `files/promtail/db-promtail.yml` в `/etc/promtail/config.yml` с правами `root:promtail 0640`.
+
+Финальный `check.yml` после этапа: `db failed=0 changed=0`.

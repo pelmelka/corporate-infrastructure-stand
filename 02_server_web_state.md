@@ -283,3 +283,23 @@ app/db/other nodes do not need access to web metrics ports;
 frontend/API path through Nginx remains healthy.
 ```
 
+
+
+## Ansible automation v2 management
+
+После Stage 20 `web` управляется следующими Ansible ролями/playbook-ами:
+
+```text
+common
+node_exporter
+nginx_frontend
+promtail
+check.yml
+network_audit.yml
+```
+
+`nginx_frontend` деплоит `files/nginx/index.html` и `files/nginx/default.conf`, выполняет `nginx -t`, reload только при изменении config, проверяет `/` и `/api/v1/health` локально.
+
+`promtail` деплоит `files/promtail/web-promtail.yml` в `/etc/promtail/config.yml` с правами `root:promtail 0640` и проверяет `:9080/metrics`.
+
+Финальный `check.yml` после этапа: `web failed=0 changed=0`.

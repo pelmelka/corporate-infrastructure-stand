@@ -309,3 +309,54 @@ The rules are restored after reboot by app-docker-user-firewall.service.
 
 Nginx HTTP hardening, HTTPS/local CA, static/DHCP-reserved IPs and Proxmox/VLAN-level segmentation are not implemented yet and remain in `12_future_improvements_backlog.md`.
 
+
+
+## Ansible network/firewall audit after Stage 20
+
+В Stage 20 firewall-правила намеренно не автоматизировались. Вместо этого добавлен audit-only playbook:
+
+```text
+admin: ~/control-node/playbooks/network_audit.yml
+```
+
+Причина: автоматизация изменений firewall без out-of-band доступа и rollback может отрезать SSH, Prometheus scrape, Loki push или Docker published ports. Поэтому текущая политика:
+
+```text
+Firewall/access changes remain manual-review based.
+Ansible provides network/firewall audit snapshots and critical flow validation.
+```
+
+`network_audit.yml` собирает на `admin`:
+
+```text
+docs/network-audit/latest/*-network-audit.txt
+docs/network-audit/latest/admin-critical-connectivity.txt
+```
+
+Проверяет/сохраняет:
+
+```text
+IP addresses, routes, DNS;
+listening TCP/UDP sockets;
+running relevant services;
+UFW status verbose/numbered;
+iptables filter/nat/DOCKER-USER;
+nft ruleset;
+Docker containers, published ports, networks, compose ps;
+local HTTP endpoints;
+critical HTTP/TCP flows from admin.
+```
+
+Последний critical connectivity audit подтвердил:
+
+```text
+web frontend       200
+web api health     200
+loki ready         200
+prometheus ready   200
+grafana            302
+alertmanager ready 200
+critical TCP flows open as expected
+```
+
+`Grafana 302` является нормальным redirect на login page.

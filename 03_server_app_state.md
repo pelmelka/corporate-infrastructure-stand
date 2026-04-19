@@ -537,3 +537,33 @@ Windows/browser direct access to app:8080/8090 is blocked;
 Browser -> web -> app -> db still works.
 ```
 
+
+
+## Ansible automation v2 management
+
+После Stage 20 `app` управляется следующими Ansible ролями/playbook-ами:
+
+```text
+common
+node_exporter
+app_compose_project
+docker_compose_service через deploy_app.yml/deploy_bot.yml
+promtail
+check.yml
+network_audit.yml
+```
+
+`app_compose_project` закрепляет runtime contract:
+
+```text
+/opt/app code/config files -> root:root 0644
+.env/.env.bot -> root:root 0600
+/var/log/app, /var/log/bot -> pelmel:adm 2750
+app.log/support-bot.log -> pelmel:adm 0640
+```
+
+`docker_compose_service` переиспользуется для `supportdesk-api` и `support-bot`; rebuild выполняется handler-ом `docker compose up -d --build <service>` только при изменении source files.
+
+`promtail` деплоит `files/promtail/app-promtail.yml` в `/etc/promtail/config.yml` с правами `root:promtail 0640`.
+
+Финальный `check.yml` после этапа: `app failed=0 changed=0`.

@@ -162,6 +162,7 @@ ansible_python_interpreter=/usr/bin/python3
 
 ```ini
 [defaults]
+roles_path = ./roles
 inventory = inventory/hosts.ini
 remote_user = pelmel
 host_key_checking = False
@@ -340,3 +341,102 @@ admin -> web/app/log/monitor/db:22 works after hardening;
 ansible-playbook playbooks/check_services.yml passes after hardening.
 ```
 
+
+
+## Ansible automation v2 — состояние после этапа 20
+
+Этап Ansible automation v2 завершен и закоммичен:
+
+```text
+03ae409 Add Ansible automation v2 roles and audit playbooks
+```
+
+`ansible.cfg` обновлен: добавлен `roles_path = ./roles`, чтобы playbook-и из `playbooks/` находили роли в корневом `roles/`.
+
+Новые group_vars:
+
+```text
+inventory/group_vars/all.yml
+inventory/group_vars/web_nodes.yml
+inventory/group_vars/app_nodes.yml
+inventory/group_vars/log_nodes.yml
+inventory/group_vars/monitor_nodes.yml
+inventory/group_vars/db_nodes.yml
+```
+
+Новые роли:
+
+```text
+roles/common
+roles/node_exporter
+roles/app_compose_project
+roles/docker_compose_service
+roles/nginx_frontend
+roles/promtail
+roles/prometheus
+roles/postgres_exporter
+roles/postgres_backup
+```
+
+Новые/актуальные playbook-и этапа:
+
+```text
+playbooks/apply_baseline.yml
+playbooks/check.yml
+playbooks/check_app_compose_project.yml
+playbooks/deploy_app.yml
+playbooks/deploy_bot.yml
+playbooks/deploy_nginx_frontend.yml
+playbooks/deploy_promtail.yml
+playbooks/deploy_prometheus.yml
+playbooks/deploy_postgres_exporter.yml
+playbooks/deploy_postgres_backup.yml
+playbooks/run_db_backup.yml
+playbooks/network_audit.yml
+```
+
+`files/` теперь содержит source-of-truth snapshots для managed deploy:
+
+```text
+files/app/                 app.py, Dockerfile, requirements.txt
+files/bot/                 bot.py, Dockerfile.bot, requirements-bot.txt
+files/app_compose/         docker-compose.yml, .dockerignore
+files/nginx/               default.conf, index.html
+files/promtail/            web/app/db Promtail configs
+files/prometheus/          prometheus.yml, supportdesk.rules.yml
+files/postgres_backup/     backup script, service, timer
+```
+
+Секреты не перенесены и не коммитятся:
+
+```text
+/opt/app/.env
+/opt/app/.env.bot
+Telegram token
+DB password
+```
+
+Audit-only network playbook:
+
+```text
+playbooks/network_audit.yml
+```
+
+Создает:
+
+```text
+docs/network-audit/latest/*-network-audit.txt
+docs/network-audit/latest/admin-critical-connectivity.txt
+```
+
+Timestamped snapshots `docs/network-audit/20*/` игнорируются Git через `.gitignore`, чтобы repository не разрастался после каждого audit run.
+
+Финальные проверки этапа:
+
+```text
+ansible-playbook playbooks/check.yml -> failed=0, changed=0 по всем узлам
+ansible-playbook playbooks/network_audit.yml -> reports created, failed=0
+ansible-playbook playbooks/run_db_backup.yml -> latest.dump size=10126 bytes, checksum files found=6
+```
+
+Firewall rule changes намеренно не автоматизированы: Ansible используется для audit/reporting и critical flow validation, а изменение firewall/access rules остается manual-review based.

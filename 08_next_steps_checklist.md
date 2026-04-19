@@ -4,9 +4,9 @@
 
 ## Текущий статус
 
-Последний завершенный этап: **Этап 19. Security/network hardening в базовом firewall/network scope**.
+Последний завершенный этап: **Этап 20. Ansible automation v2**.
 
-Текущий следующий крупный этап: **Этап 20. Ansible automation v2** или **final README/demo packaging**. Nginx/HTTPS/static IP/secrets improvements оставлены в backlog.
+Текущий следующий крупный этап: **Этап 21. Финальная документация, README и demo packaging**. Nginx/HTTPS/static IP/secrets improvements оставлены в backlog.
 
 Текущая архитектура продукта:
 
@@ -162,11 +162,31 @@ app/bot/db/node metrics -> Prometheus -> Grafana/Alertmanager
 - [x] Prometheus targets и Grafana/Loki observability не сломаны.
 
 
-## Далее после Security/network hardening
+## Завершено: Ansible automation v2
 
-- [ ] Ansible automation v2 для Docker app, support-bot, firewall rules, Prometheus rules, Promtail configs, PostgreSQL/backup checks.
+- [x] `admin` стал полноценным Ansible control node для deploy/check/audit операций.
+- [x] Добавлен `roles_path = ./roles` в `ansible.cfg`.
+- [x] Созданы `inventory/group_vars`: `all`, `web_nodes`, `app_nodes`, `log_nodes`, `monitor_nodes`, `db_nodes`.
+- [x] Реализованы роли: `common`, `node_exporter`, `app_compose_project`, `docker_compose_service`, `nginx_frontend`, `promtail`, `prometheus`, `postgres_exporter`, `postgres_backup`.
+- [x] Реализованы playbook-и: `apply_baseline.yml`, `check.yml`, `check_app_compose_project.yml`, `deploy_app.yml`, `deploy_bot.yml`, `deploy_nginx_frontend.yml`, `deploy_promtail.yml`, `deploy_prometheus.yml`, `deploy_postgres_exporter.yml`, `deploy_postgres_backup.yml`, `run_db_backup.yml`, `network_audit.yml`.
+- [x] `supportdesk-api` и `support-bot` деплоятся через одну переиспользуемую роль `docker_compose_service` с разными переменными.
+- [x] Nginx frontend/reverse proxy управляется ролью `nginx_frontend` с `nginx -t` перед reload.
+- [x] Promtail configs на `web/app/db` управляются одной ролью `promtail`, права приведены к `root:promtail 0640`.
+- [x] Prometheus config/rules управляются ролью `prometheus`, валидация выполняется через `promtool`, targets проверяются через JSON API.
+- [x] PostgreSQL exporter управляется ролью `postgres_exporter`.
+- [x] PostgreSQL backup automation управляется ролью `postgres_backup`; ручной запуск вынесен в `run_db_backup.yml` через `include_role tasks_from=run_backup`.
+- [x] Backup canonical path синхронизирован: `/var/backups/postgresql/supportdesk`.
+- [x] Backup script права исправлены на `root:postgres 0750`; `latest.dump` проверяется с `follow: true`.
+- [x] Добавлен audit-only `network_audit.yml`, который собирает network/firewall/Docker/connectivity reports без изменения firewall rules.
+- [x] Финальный `check.yml` после этапа: `failed=0`, `changed=0` на всех узлах.
+- [x] Git commit: `03ae409 Add Ansible automation v2 roles and audit playbooks`.
+
+## Далее после Ansible automation v2
+
 - [ ] Финальный README/demo package.
 - [ ] Export Grafana dashboard JSON в Git/sources.
+- [ ] Подготовить screenshots/dashboard export для README.
+- [ ] Подготовить demo сценарии: web/API, Telegram bot, alerts, logs, metrics, backup/restore, network audit.
 - [ ] Proxmox snapshots checklist.
 
 ## Future backlog

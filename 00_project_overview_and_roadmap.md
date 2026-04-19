@@ -830,22 +830,55 @@ Proxmox firewall/VLAN/отдельные подсети.
 ```
 
 
-## Этап 20. Ansible automation v2
+## Этап 20. Ansible automation v2 — завершено
 
-Цель: автоматизировать уже новую архитектуру: app, Docker, DB, bot, monitoring rules.
+Цель этапа: формализовать текущую production-like инфраструктуру в Ansible roles/playbooks так, чтобы `admin` стал полноценным control node и source of truth для deploy/config/check операций.
 
-Playbooks/roles:
+Git state:
 
 ```text
-common.yml
-nginx.yml
-app.yml
-docker_app.yml
-promtail.yml
-prometheus.yml
-postgres.yml
-bot.yml
-backup.yml
+Repo: /home/pelmel/control-node
+Branch: master
+Commit: 03ae409 Add Ansible automation v2 roles and audit playbooks
+```
+
+Реализовано:
+
+```text
+inventory/group_vars: all.yml, web_nodes.yml, app_nodes.yml, log_nodes.yml, monitor_nodes.yml, db_nodes.yml
+roles: common, node_exporter, app_compose_project, docker_compose_service, nginx_frontend, promtail, prometheus, postgres_exporter, postgres_backup
+playbooks: apply_baseline, check, check_app_compose_project, deploy_app, deploy_bot, deploy_nginx_frontend, deploy_promtail, deploy_prometheus, deploy_postgres_exporter, deploy_postgres_backup, run_db_backup, network_audit
+files/: app/bot/app_compose/nginx/promtail/prometheus/postgres_backup source-of-truth snapshots
+```
+
+Ключевые решения:
+
+```text
+code/config на app управляется root/Ansible;
+.env и .env.bot не коммитятся, проверяются no_log task-ами и имеют root:root 0600;
+логи app/bot остаются pelmel:adm 0640, директории pelmel:adm 2750, чтобы Promtail читал через adm;
+Promtail configs приведены к root:promtail 0640;
+backup script приведен к root:postgres 0750, потому что service запускается от postgres;
+latest.dump проверяется через stat follow=true, так как это symlink;
+Prometheus targets проверяются через JSON API и labels.job, а не поиском строки в сыром ответе;
+network/firewall changes intentionally не автоматизированы — добавлен audit-only network_audit.yml.
+```
+
+Network/firewall audit:
+
+```text
+playbooks/network_audit.yml собирает отчеты в docs/network-audit/latest/ и timestamped snapshots;
+собираются ip/route/DNS, listening ports, UFW, iptables/nat/DOCKER-USER, nftables, Docker ports/networks, local HTTP endpoints и critical admin connectivity checks;
+timestamped snapshots docs/network-audit/20*/ игнорируются Git, latest/ хранится как актуальный снимок.
+```
+
+Проверено:
+
+```text
+ansible-playbook playbooks/check.yml -> failed=0, changed=0 по admin/web/app/log/monitor/db;
+run_db_backup.yml -> latest.dump size > 0, checksum files found=6;
+network_audit.yml -> reports created, critical HTTP/TCP flows open as expected;
+Grafana HTTP 302 в audit считается нормальным redirect на login page.
 ```
 
 ## Этап 21. Финальная документация, README и demo packaging
@@ -872,9 +905,9 @@ Snapshots/контрольные точки в Proxmox
 # Текущий маркер прогресса
 
 ```text
-Последний завершенный этап: Этап 19. Security/network hardening в базовом firewall/network scope.
-Текущий следующий этап: Этап 20. Ansible automation v2 или финальная README/demo packaging.
-Далее: Ansible automation v2, final README/demo; Nginx/HTTPS/static IP/secrets improvements оставлены в backlog.
+Последний завершенный этап: Этап 20. Ansible automation v2.
+Текущий следующий этап: Этап 21. Финальная документация, README и demo packaging.
+Далее: финальная упаковка проекта, README/demo сценарии, screenshots/dashboard export, Proxmox snapshots checklist.
 ```
 
 ## Текущий прогресс проекта
@@ -882,14 +915,14 @@ Snapshots/контрольные точки в Proxmox
 Важно: прогресс считается относительно расширенного production-like roadmap.
 
 ```text
-Формальная готовность по расширенному roadmap: 19/21 основных этапов завершены ≈ 90%.
+Формальная готовность по расширенному roadmap: 20/21 основных этапов завершены ≈ 95%.
 Готовность core infrastructure lab: 100% по этапам 1–10.
 Admin/Ansible foundation: 100%.
 Product model v2: 100%.
 DB observability и backups: 100%.
-Инженерная готовность по новому production-like scope: 93–95%.
-Демонстрационная готовность текущего core-проекта: 98–99%.
-Финальная демонстрационная готовность с DB/Bot/Ansible v2: 82–86%.
+Инженерная готовность по новому production-like scope: 97–98%.
+Демонстрационная готовность текущего core-проекта: 99%.
+Финальная демонстрационная готовность с DB/Bot/Ansible v2: 92–95%.
 ```
 
 Разбивка по этапам:
@@ -915,8 +948,8 @@ DB observability и backups: 100%.
 | 17. DB observability + backups | завершено | 100% | db добавлен в Ansible/Prometheus/Grafana/Loki; postgres_exporter, DB alerts, PostgreSQL logs, pg_dump backup, checksum, restore test и systemd timer готовы. |
 | 18. Telegram support bot + bot observability | завершено | 100% | Telegram bot реализован как Docker Compose service, работает через long polling/proxy, создает/показывает/закрывает заявки через API v1, пишет source=telegram, логи идут в Loki, native /metrics подключены к Prometheus, bot alerts и Grafana row готовы. |
 | 19. Security/network hardening | завершено в firewall/network scope | 100% базового scope | UFW на web/app/log/monitor/db; app Docker ports закрыты через DOCKER-USER + systemd persistence; Nginx/HTTPS/static IP/secrets оставлены в backlog. |
-| 20. Ansible automation v2 | план | 0–10% | Зависит от дальнейшей формализации deploy. |
-| 21. Final README/demo packaging | план | 25–35% | Sources ведутся, но финальный README/demo/snapshots еще не собраны. |
+| 20. Ansible automation v2 | завершено | 100% | Добавлены group_vars, roles, deploy/check playbooks, DB backup runbook и audit-only network_audit; commit 03ae409. | 0–10% | Зависит от дальнейшей формализации deploy. |
+| 21. Final README/demo packaging | план | 35–45% | Sources актуализируются, но финальный README/demo/screenshots/snapshots еще не собраны. | 25–35% | Sources ведутся, но финальный README/demo/snapshots еще не собраны. |
 
 Короткая интерпретация:
 

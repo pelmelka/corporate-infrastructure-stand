@@ -301,3 +301,17 @@ external/non-allowed access to log:9095 is blocked;
 Grafana/Loki logs remain available.
 ```
 
+
+
+## Ansible automation v2 management
+
+После Stage 20 `log` покрыт baseline/check/audit слоем:
+
+```text
+common
+node_exporter
+check.yml
+network_audit.yml
+```
+
+Loki config пока не выделен в отдельную Ansible role в Stage 20; его состояние проверяется через `check.yml` и фиксируется сетевым audit report. Финальный `check.yml`: `log failed=0 changed=0`.

@@ -511,3 +511,30 @@ Prometheus /-/ready works;
 Prometheus targets remain UP.
 ```
 
+
+
+## Ansible automation v2 management
+
+После Stage 20 `monitor` управляется следующими Ansible ролями/playbook-ами:
+
+```text
+common
+node_exporter
+prometheus
+check.yml
+network_audit.yml
+```
+
+`prometheus` role:
+
+```text
+- деплоит files/prometheus/prometheus.yml;
+- деплоит files/prometheus/supportdesk.rules.yml;
+- валидирует через promtool;
+- restart Prometheus только при изменениях;
+- ждет /-/ready;
+- проверяет targets API как JSON;
+- assert expected jobs: prometheus, node, supportdesk-api, support-bot, promtail-web, postgres.
+```
+
+Финальный `check.yml` после этапа: `monitor failed=0 changed=0`.
