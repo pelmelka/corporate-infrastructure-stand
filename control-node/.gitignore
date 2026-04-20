@@ -6,3 +6,6 @@
 __pycache__/
 .vault_pass
 *.log
+
+# Network audit timestamped snapshots
+docs/network-audit/20*/
