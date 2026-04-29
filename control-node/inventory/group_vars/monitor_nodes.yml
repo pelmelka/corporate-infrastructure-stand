@@ -1,0 +1,31 @@
+---
+node_role: "monitor"
+
+prometheus_service_name: "prometheus.service"
+grafana_service_name: "grafana-server.service"
+alertmanager_service_name: "prometheus-alertmanager.service"
+
+prometheus_config_path: "/etc/prometheus/prometheus.yml"
+prometheus_rules_path: "/etc/prometheus/supportdesk.rules.yml"
+
+prometheus_ready_url: "http://localhost:9090/-/ready"
+prometheus_targets_url: "http://localhost:9090/api/v1/targets"
+alertmanager_ready_url: "http://localhost:9093/-/ready"
+grafana_url: "http://localhost:3000"
+
+prometheus_rules_local_src: "{{ playbook_dir }}/../files/prometheus/supportdesk.rules.yml"
+prometheus_config_template: "prometheus.yml.j2"
+
+monitor_expected_services:
+  - "{{ prometheus_service_name }}"
+  - "{{ grafana_service_name }}"
+  - "{{ alertmanager_service_name }}"
+  - "{{ node_exporter_service_name }}"
+
+prometheus_expected_jobs:
+  - "prometheus"
+  - "node"
+  - "supportdesk-api"
+  - "support-bot"
+  - "promtail-web"
+  - "postgres"
