@@ -1,0 +1,125 @@
+---
+- name: Ensure Docker service is active
+  ansible.builtin.command: "systemctl is-active {{ docker_service_name }}"
+  changed_when: false
+
+- name: Check Docker Compose version
+  ansible.builtin.command: "docker compose version"
+  changed_when: false
+  register: docker_compose_version
+
+- name: Show Docker Compose version
+  ansible.builtin.debug:
+    msg: "{{ docker_compose_version.stdout }}"
+
+- name: Ensure compose project directory exists
+  ansible.builtin.file:
+    path: "{{ compose_project_dir }}"
+    state: directory
+    owner: "{{ app_compose_owner }}"
+    group: "{{ app_compose_group }}"
+    mode: "{{ app_compose_dir_mode }}"
+
+- name: Ensure app and bot log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_compose_log_owner }}"
+    group: "{{ app_compose_log_group }}"
+    mode: "{{ app_compose_log_dir_mode }}"
+  loop: "{{ app_compose_log_directories }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Check app and bot log files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ app_compose_log_files }}"
+  loop_control:
+    label: "{{ item }}"
+  register: app_compose_log_file_stats
+
+- name: Create missing app and bot log files
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: touch
+    owner: "{{ app_compose_log_owner }}"
+    group: "{{ app_compose_log_group }}"
+    mode: "{{ app_compose_log_file_mode }}"
+  loop: "{{ app_compose_log_file_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists
+
+- name: Enforce app and bot log file permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: file
+    owner: "{{ app_compose_log_owner }}"
+    group: "{{ app_compose_log_group }}"
+    mode: "{{ app_compose_log_file_mode }}"
+  loop: "{{ app_compose_log_files }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Check required Docker Compose project files exist
+  ansible.builtin.stat:
+    path: "{{ compose_project_dir }}/{{ item }}"
+  loop: "{{ app_compose_required_files }}"
+  loop_control:
+    label: "{{ item }}"
+  register: app_compose_required_file_stats
+
+- name: Fail if required Docker Compose project file is missing
+  ansible.builtin.fail:
+    msg: "{{ compose_project_dir }}/{{ item.item }} is missing"
+  loop: "{{ app_compose_required_file_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists
+
+- name: Enforce Docker Compose project file permissions
+  ansible.builtin.file:
+    path: "{{ compose_project_dir }}/{{ item }}"
+    state: file
+    owner: "{{ app_compose_file_owner }}"
+    group: "{{ app_compose_file_group }}"
+    mode: "{{ app_compose_file_mode }}"
+  loop: "{{ app_compose_required_files }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Check required env files exist
+  ansible.builtin.stat:
+    path: "{{ compose_project_dir }}/{{ item }}"
+  loop: "{{ app_compose_required_env_files }}"
+  register: app_compose_env_file_stats
+  no_log: true
+
+- name: Fail if required env file is missing
+  ansible.builtin.fail:
+    msg: "{{ compose_project_dir }}/{{ item.item }} is missing"
+  loop: "{{ app_compose_env_file_stats.results }}"
+  when: not item.stat.exists
+  no_log: true
+
+- name: Enforce env file permissions
+  ansible.builtin.file:
+    path: "{{ compose_project_dir }}/{{ item }}"
+    state: file
+    owner: "{{ app_compose_env_owner }}"
+    group: "{{ app_compose_env_group }}"
+    mode: "{{ app_compose_env_mode }}"
+  loop: "{{ app_compose_required_env_files }}"
+  no_log: true
+
+- name: Check current Docker Compose services
+  ansible.builtin.command: "docker compose ps"
+  args:
+    chdir: "{{ compose_project_dir }}"
+  changed_when: false
+  register: app_compose_ps
+
+- name: Show current Docker Compose services
+  ansible.builtin.debug:
+    var: app_compose_ps.stdout_lines
