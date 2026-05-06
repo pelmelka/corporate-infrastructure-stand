@@ -1,0 +1,21 @@
+---
+- name: Deploy supportdesk API
+  hosts: app_nodes
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  roles:
+    - app_compose_project
+
+    - role: docker_compose_service
+      compose_service_name: "{{ supportdesk_api.compose_service_name }}"
+      compose_source_dir: "{{ playbook_dir }}/../files/app"
+      compose_source_files: "{{ supportdesk_api.source_files }}"
+      compose_env_file: "{{ supportdesk_api.env_file }}"
+      compose_healthcheck_url: "{{ supportdesk_api.healthcheck_url }}"
+      compose_metrics_url: "{{ supportdesk_api.metrics_url }}"
