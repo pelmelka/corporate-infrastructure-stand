@@ -1,0 +1,16 @@
+---
+- name: Deploy Promtail configs
+  hosts:
+    - web_nodes
+    - app_nodes
+    - db_nodes
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  roles:
+    - promtail

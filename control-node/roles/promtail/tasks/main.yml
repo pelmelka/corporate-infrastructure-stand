@@ -1,0 +1,59 @@
+---
+- name: Assert required promtail variables are defined
+  ansible.builtin.assert:
+    that:
+      - node_role is defined
+      - promtail_service_name is defined
+      - promtail_config_path is defined
+      - promtail_config_src is defined
+      - promtail_metrics_url is defined
+    fail_msg: "Required promtail variables are missing."
+
+- name: Check Promtail source config exists on control node
+  ansible.builtin.stat:
+    path: "{{ promtail_config_src }}"
+  delegate_to: localhost
+  register: promtail_source_config_stat
+
+- name: Fail if Promtail source config is missing on control node
+  ansible.builtin.fail:
+    msg: "{{ promtail_config_src }} is missing on control node."
+  when: not promtail_source_config_stat.stat.exists
+
+- name: Ensure Promtail config directory exists
+  ansible.builtin.file:
+    path: "{{ promtail_config_path | dirname }}"
+    state: directory
+    owner: "root"
+    group: "root"
+    mode: "0755"
+
+- name: Deploy Promtail config
+  ansible.builtin.copy:
+    src: "{{ promtail_config_src }}"
+    dest: "{{ promtail_config_path }}"
+    owner: "{{ promtail_config_owner }}"
+    group: "{{ promtail_config_group }}"
+    mode: "{{ promtail_config_mode }}"
+    backup: true
+  notify: Restart promtail
+
+- name: Run pending Promtail handlers before checks
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure Promtail is enabled and running
+  ansible.builtin.systemd_service:
+    name: "{{ promtail_service_name }}"
+    enabled: true
+    state: started
+
+- name: Check Promtail service is active
+  ansible.builtin.command: "systemctl is-active {{ promtail_service_name }}"
+  changed_when: false
+
+- name: Check Promtail metrics endpoint
+  ansible.builtin.uri:
+    url: "{{ promtail_metrics_url }}"
+    method: GET
+    status_code: 200
+    return_content: false

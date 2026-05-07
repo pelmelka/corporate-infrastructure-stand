@@ -1,0 +1,38 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://192.168.85.135:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: app
+    pipeline_stages:
+      - regex:
+          expression: '(^|.*\s)category=(?P<category>[a-z0-9-]+)(\s|$)'
+      - labels:
+          category:
+
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          host: app
+          job: app
+          service: misis-digital-student-support-api
+          env: lab
+          __path__: /var/log/app/*.log
+
+  - job_name: support-bot
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          host: app
+          job: support-bot
+          service: misis-digital-support-bot
+          env: lab
+          __path__: /var/log/bot/*.log
