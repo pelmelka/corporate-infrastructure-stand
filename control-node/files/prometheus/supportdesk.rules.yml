@@ -6,20 +6,110 @@ groups:
         for: 30s
         labels:
           severity: critical
-          service: support-desk-api
+          service: misis-digital-student-support-api
         annotations:
-          summary: "SupportDesk API is down"
-          description: "Prometheus cannot scrape supportdesk-api on {{ $labels.instance }} for more than 30 seconds."
+          summary: "Support Desk API is down"
+          description: "Prometheus cannot scrape MISIS_Digital Student Support API for more than 30 seconds. Instance: {{ $labels.instance }}."
 
-      - alert: TooManyOpenTickets
-        expr: supportdesk_tickets_open{job="supportdesk-api"} >= 3
-        for: 30s
+      - alert: HttpApiSupportDeskHigh4xxRate
+        expr: |
+          (
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api",status_code=~"4.."}[5m]))
+            /
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m]))
+          ) > 0.30
+          and
+          sum(increase(supportdesk_http_requests_total{job="supportdesk-api"}[5m])) >= 5
+        for: 2m
         labels:
           severity: warning
-          service: support-desk-api
+          service: misis-digital-student-support-api
         annotations:
-          summary: "Too many open support tickets"
-          description: "There are {{ $value }} open support tickets in Mini Support Desk."
+          summary: "Support Desk API has high 4xx rate"
+          description: "More than 30% of recent API requests returned 4xx responses. This usually means many invalid client, UI or API requests."
+
+      - alert: HttpApiSupportDeskHigh5xxRate
+        expr: |
+          (
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api",status_code=~"5.."}[5m]))
+            /
+            sum(rate(supportdesk_http_requests_total{job="supportdesk-api"}[5m]))
+          ) > 0.05
+          and
+          sum(increase(supportdesk_http_requests_total{job="supportdesk-api"}[5m])) >= 5
+        for: 1m
+        labels:
+          severity: critical
+          service: misis-digital-student-support-api
+        annotations:
+          summary: "Support Desk API has high 5xx rate"
+          description: "More than 5% of recent API requests returned 5xx responses. This usually means backend-side errors."
+
+      - alert: HttpApiSupportDeskHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by(le) (
+              rate(supportdesk_http_request_duration_seconds_bucket{job="supportdesk-api"}[5m])
+            )
+          ) > 0.5
+          and
+          sum(increase(supportdesk_http_requests_total{job="supportdesk-api"}[5m])) >= 5
+        for: 2m
+        labels:
+          severity: warning
+          service: misis-digital-student-support-api
+        annotations:
+          summary: "Support Desk API has high latency"
+          description: "p95 API latency is above 0.5 seconds for more than 2 minutes."
+
+      - alert: HttpApiNginx502Spike
+        expr: |
+          sum(increase(promtail_custom_nginx_http_responses_total{job="promtail-web",host="web",status_code="502"}[5m])) >= 3
+        for: 30s
+        labels:
+          severity: critical
+          service: frontend
+        annotations:
+          summary: "Nginx is returning 502 responses"
+          description: "Nginx on web returned {{ printf \"%.0f\" $value }} HTTP 502 responses in the last 5 minutes. This usually means the backend app is unavailable or reverse proxy upstream is broken."
+
+      - alert: PostgreSQLExporterDown
+        expr: up{job="postgres"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL exporter is down"
+          description: "Prometheus cannot scrape postgres_exporter for more than 30 seconds. Host: {{ $labels.host }}. Instance: {{ $labels.instance }}."
+
+      - alert: PostgreSQLDown
+        expr: pg_up{job="postgres"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL is unavailable"
+          description: "postgres_exporter is reachable, but it cannot connect to PostgreSQL. Host: {{ $labels.host }}."
+
+      - alert: PostgreSQLTooManyConnections
+        expr: |
+          max by(host) (
+            pg_stat_database_numbackends{job="postgres",datname="supportdesk"}
+          )
+          /
+          max by(host) (
+            pg_settings_max_connections{job="postgres"}
+          ) > 0.8
+        for: 2m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL has too many connections"
+          description: "The supportdesk database is using more than 80% of max_connections. Host: {{ $labels.host }}."
 
       - alert: HighDiskUsage
         expr: 100 * (1 - (node_filesystem_avail_bytes{job="node", mountpoint="/", fstype="ext4"} / node_filesystem_size_bytes{job="node", mountpoint="/", fstype="ext4"})) > 80
@@ -28,8 +118,8 @@ groups:
           severity: warning
           service: node
         annotations:
-          summary: "High disk usage on {{ $labels.host }}"
-          description: "Root filesystem on {{ $labels.host }} is {{ printf "%.1f" $value }}% full."
+          summary: "Root disk usage is high"
+          description: "Root filesystem usage is above 80%. Host: {{ $labels.host }}. Current usage: {{ printf \"%.1f\" $value }}%."
 
       - alert: NodeTargetDown
         expr: up{job="node"} == 0
@@ -38,5 +128,79 @@ groups:
           severity: critical
           service: node
         annotations:
-          summary: "Node target is down: {{ $labels.host }}"
-          description: "Prometheus cannot scrape node_exporter on {{ $labels.host }} at {{ $labels.instance }} for more than 30 seconds."
+          summary: "Node exporter target is down"
+          description: "Prometheus cannot scrape node_exporter for more than 30 seconds. Host: {{ $labels.host }}. Instance: {{ $labels.instance }}."
+
+      - alert: SupportDeskTooManyTicketsForResource
+        expr: sum by(category, resource) (supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress"}) >= 3
+        for: 30s
+        labels:
+          severity: warning
+          service: support-desk-api
+        annotations:
+          summary: "Too many active tickets for one resource"
+          description: "There are {{ printf \"%.0f\" $value }} active tickets for category={{ $labels.category }}, resource={{ $labels.resource }}."
+
+      - alert: SupportDeskCriticalTicketsOpen
+        expr: sum by(category, resource) (supportdesk_tickets_current{job="supportdesk-api",status=~"open|in_progress",priority="critical"}) > 0
+        for: 30s
+        labels:
+          severity: critical
+          service: support-desk-api
+        annotations:
+          summary: "Critical support ticket is open"
+          description: "There are {{ printf \"%.0f\" $value }} active critical tickets for category={{ $labels.category }}, resource={{ $labels.resource }}."
+
+      - alert: SupportDeskOldCriticalTicket
+        expr: max by(category, resource) (supportdesk_active_ticket_age_seconds_max{job="supportdesk-api",priority="critical"}) > 600
+        for: 30s
+        labels:
+          severity: critical
+          service: support-desk-api
+        annotations:
+          summary: "Old critical support ticket is still open"
+          description: "The oldest active critical ticket is older than 10 minutes. Category: {{ $labels.category }}. Resource: {{ $labels.resource }}. Age: {{ printf \"%.0f\" $value }} seconds."
+
+      - alert: SupportBotDown
+        expr: up{job="support-bot"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: misis-digital-support-bot
+        annotations:
+          summary: "Telegram support bot is down"
+          description: "Prometheus cannot scrape the support-bot metrics endpoint for more than 30 seconds. Instance: {{ $labels.instance }}."
+
+      - alert: SupportBotBackendErrors
+        expr: |
+          sum by(endpoint, method, status_code) (
+            increase(
+              support_bot_api_requests_total{
+                job="support-bot",
+                status_code!~"2.."
+              }[10m]
+            )
+          ) >= 1
+        for: 30s
+        labels:
+          severity: warning
+          service: misis-digital-support-bot
+        annotations:
+          summary: "Telegram support bot has backend API errors"
+          description: "The bot received failed backend API responses during the last 10 minutes. Endpoint: {{ $labels.endpoint }}. Method: {{ $labels.method }}. Status: {{ $labels.status_code }}. Errors: {{ printf \"%.0f\" $value }}."
+
+      - alert: SupportBotErrorsDetected
+        expr: |
+          increase(
+            support_bot_errors_total{
+              job="support-bot",
+              type!="backend_error"
+            }[10m]
+          ) >= 1
+        for: 30s
+        labels:
+          severity: warning
+          service: misis-digital-support-bot
+        annotations:
+          summary: "Telegram support bot has non-backend errors"
+          description: "The bot recorded non-backend errors during the last 10 minutes. Error type: {{ $labels.type }}. Errors: {{ printf \"%.0f\" $value }}."
