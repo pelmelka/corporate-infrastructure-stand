@@ -1,0 +1,10 @@
+[Unit]
+Description=Run supportdesk PostgreSQL backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+Unit=backup-supportdesk.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,38 @@
+---
+- name: Run PostgreSQL backup service now
+  ansible.builtin.systemd_service:
+    name: "{{ backup_service_name }}"
+    state: started
+
+- name: Check latest PostgreSQL backup dump after manual run
+  ansible.builtin.stat:
+    path: "{{ backup_latest_dump_path }}"
+    follow: true
+  register: postgres_backup_latest_dump_after_run
+
+- name: Assert latest PostgreSQL backup dump exists after manual run
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_latest_dump_after_run.stat.exists
+      - postgres_backup_latest_dump_after_run.stat.size | int > 0
+    fail_msg: "{{ backup_latest_dump_path }} is missing or empty after backup run."
+
+- name: Find PostgreSQL backup checksum files
+  ansible.builtin.find:
+    paths: "{{ backup_dir }}"
+    patterns: "*.sha256"
+    file_type: file
+  register: postgres_backup_checksum_files
+
+- name: Assert at least one PostgreSQL backup checksum exists
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_checksum_files.matched | int > 0
+    fail_msg: "No .sha256 checksum files found in {{ backup_dir }}."
+
+- name: Show latest PostgreSQL backup dump metadata
+  ansible.builtin.debug:
+    msg:
+      - "latest.dump path: {{ backup_latest_dump_path }}"
+      - "latest.dump size: {{ postgres_backup_latest_dump_after_run.stat.size }} bytes"
+      - "checksum files found: {{ postgres_backup_checksum_files.matched }}"
