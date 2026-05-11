@@ -1,0 +1,4 @@
+---
+postgres_exporter_package_name: "prometheus-postgres-exporter"
+postgres_exporter_service: "{{ postgres_exporter_service_name }}"
+postgres_exporter_metrics_url: "http://localhost:{{ postgres_exporter_port }}/metrics"
