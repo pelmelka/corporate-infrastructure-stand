@@ -1,0 +1,112 @@
+log | CHANGED | rc=0 >>
+===== HOST =====
+log
+
+===== IP =====
+    inet 192.168.85.135/24 brd 192.168.85.255 scope global dynamic noprefixroute ens18
+
+===== ROUTE =====
+default via 192.168.85.2 dev ens18 proto dhcp src 192.168.85.135 metric 1002 
+192.168.85.0/24 dev ens18 proto dhcp scope link src 192.168.85.135 metric 1002 
+
+===== LISTENING TCP/UDP PORTS =====
+Netid State  Recv-Q Send-Q                     Local Address:Port Peer Address:PortProcess                                  
+udp   UNCONN 0      0                         192.168.85.135:68        0.0.0.0:*    users:(("dhcpcd",pid=914,fd=3))         
+udp   UNCONN 0      0      [fe80::a372:11a2:36b5:9c93]%ens18:546          [::]:*    users:(("dhcpcd",pid=886,fd=3))         
+tcp   LISTEN 0      128                              0.0.0.0:22        0.0.0.0:*    users:(("sshd",pid=672,fd=6))           
+tcp   LISTEN 0      128                                 [::]:22           [::]:*    users:(("sshd",pid=672,fd=7))           
+tcp   LISTEN 0      4096                                   *:3100            *:*    users:(("loki",pid=647,fd=7))           
+tcp   LISTEN 0      4096                                   *:9095            *:*    users:(("loki",pid=647,fd=8))           
+tcp   LISTEN 0      4096                                   *:9100            *:*    users:(("prometheus-node",pid=569,fd=3))
+web | CHANGED | rc=0 >>
+===== HOST =====
+web
+
+===== IP =====
+    inet 192.168.85.131/24 brd 192.168.85.255 scope global dynamic noprefixroute ens18
+
+===== ROUTE =====
+default via 192.168.85.2 dev ens18 proto dhcp src 192.168.85.131 metric 1002 
+192.168.85.0/24 dev ens18 proto dhcp scope link src 192.168.85.131 metric 1002 
+
+===== LISTENING TCP/UDP PORTS =====
+Netid State  Recv-Q Send-Q                    Local Address:Port  Peer Address:PortProcess                                               
+udp   UNCONN 0      0                        192.168.85.131:68         0.0.0.0:*    users:(("dhcpcd",pid=925,fd=3))                      
+udp   UNCONN 0      0      [fe80::7c47:cfff:f01:c3ce]%ens18:546           [::]:*    users:(("dhcpcd",pid=898,fd=3))                      
+tcp   LISTEN 0      128                             0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=665,fd=6))                        
+tcp   LISTEN 0      511                             0.0.0.0:80         0.0.0.0:*    users:(("nginx",pid=676,fd=5),("nginx",pid=667,fd=5))
+tcp   LISTEN 0      128                                [::]:22            [::]:*    users:(("sshd",pid=665,fd=7))                        
+tcp   LISTEN 0      511                                [::]:80            [::]:*    users:(("nginx",pid=676,fd=6),("nginx",pid=667,fd=6))
+tcp   LISTEN 0      4096                                  *:9080             *:*    users:(("promtail",pid=620,fd=7))                    
+tcp   LISTEN 0      4096                                  *:35677            *:*    users:(("promtail",pid=620,fd=8))                    
+tcp   LISTEN 0      4096                                  *:9100             *:*    users:(("prometheus-node",pid=571,fd=3))             
+app | CHANGED | rc=0 >>
+===== HOST =====
+app
+
+===== IP =====
+    inet 192.168.85.133/24 brd 192.168.85.255 scope global dynamic noprefixroute ens18
+
+===== ROUTE =====
+default via 192.168.85.2 dev ens18 proto dhcp src 192.168.85.133 metric 1002 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+172.18.0.0/16 dev br-8a2aff79a31d proto kernel scope link src 172.18.0.1 
+192.168.85.0/24 dev ens18 proto dhcp scope link src 192.168.85.133 metric 1002 
+
+===== LISTENING TCP/UDP PORTS =====
+Netid State  Recv-Q Send-Q                    Local Address:Port  Peer Address:PortProcess                                  
+udp   UNCONN 0      0                        192.168.85.133:68         0.0.0.0:*    users:(("dhcpcd",pid=1385,fd=3))        
+udp   UNCONN 0      0      [fe80::6dfc:8f75:4cd0:a2a]%ens18:546           [::]:*    users:(("dhcpcd",pid=902,fd=3))         
+tcp   LISTEN 0      4096                            0.0.0.0:8090       0.0.0.0:*    users:(("docker-proxy",pid=1342,fd=8))  
+tcp   LISTEN 0      4096                            0.0.0.0:8080       0.0.0.0:*    users:(("docker-proxy",pid=1318,fd=8))  
+tcp   LISTEN 0      128                             0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=665,fd=6))           
+tcp   LISTEN 0      4096                               [::]:8090          [::]:*    users:(("docker-proxy",pid=1347,fd=8))  
+tcp   LISTEN 0      4096                               [::]:8080          [::]:*    users:(("docker-proxy",pid=1323,fd=8))  
+tcp   LISTEN 0      4096                                  *:9100             *:*    users:(("prometheus-node",pid=575,fd=3))
+tcp   LISTEN 0      4096                                  *:9080             *:*    users:(("promtail",pid=628,fd=7))       
+tcp   LISTEN 0      4096                                  *:35541            *:*    users:(("promtail",pid=628,fd=8))       
+tcp   LISTEN 0      128                                [::]:22            [::]:*    users:(("sshd",pid=665,fd=7))           
+db | CHANGED | rc=0 >>
+===== HOST =====
+db
+
+===== IP =====
+    inet 192.168.85.139/24 brd 192.168.85.255 scope global dynamic noprefixroute ens18
+
+===== ROUTE =====
+default via 192.168.85.2 dev ens18 proto dhcp src 192.168.85.139 metric 1002 
+192.168.85.0/24 dev ens18 proto dhcp scope link src 192.168.85.139 metric 1002 
+
+===== LISTENING TCP/UDP PORTS =====
+Netid State  Recv-Q Send-Q                     Local Address:Port  Peer Address:PortProcess                                  
+udp   UNCONN 0      0                         192.168.85.139:68         0.0.0.0:*    users:(("dhcpcd",pid=973,fd=3))         
+udp   UNCONN 0      0      [fe80::2cde:8b35:4c38:58f4]%ens18:546           [::]:*    users:(("dhcpcd",pid=927,fd=3))         
+tcp   LISTEN 0      128                              0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=709,fd=6))           
+tcp   LISTEN 0      200                              0.0.0.0:5432       0.0.0.0:*    users:(("postgres",pid=816,fd=6))       
+tcp   LISTEN 0      128                                 [::]:22            [::]:*    users:(("sshd",pid=709,fd=7))           
+tcp   LISTEN 0      4096                                   *:36059            *:*    users:(("promtail",pid=675,fd=8))       
+tcp   LISTEN 0      200                                 [::]:5432          [::]:*    users:(("postgres",pid=816,fd=7))       
+tcp   LISTEN 0      4096                                   *:9080             *:*    users:(("promtail",pid=675,fd=7))       
+tcp   LISTEN 0      4096                                   *:9100             *:*    users:(("prometheus-node",pid=574,fd=3))
+tcp   LISTEN 0      4096                                   *:9187             *:*    users:(("prometheus-post",pid=584,fd=3))
+monitor | CHANGED | rc=0 >>
+===== HOST =====
+monitor
+
+===== IP =====
+    inet 192.168.85.137/24 brd 192.168.85.255 scope global dynamic noprefixroute ens18
+
+===== ROUTE =====
+default via 192.168.85.2 dev ens18 proto dhcp src 192.168.85.137 metric 1002 
+192.168.85.0/24 dev ens18 proto dhcp scope link src 192.168.85.137 metric 1002 
+
+===== LISTENING TCP/UDP PORTS =====
+Netid State  Recv-Q Send-Q                     Local Address:Port Peer Address:PortProcess                                  
+udp   UNCONN 0      0                         192.168.85.137:68        0.0.0.0:*    users:(("dhcpcd",pid=958,fd=3))         
+udp   UNCONN 0      0      [fe80::1f3f:c263:f457:a62b]%ens18:546          [::]:*    users:(("dhcpcd",pid=879,fd=3))         
+tcp   LISTEN 0      128                              0.0.0.0:22        0.0.0.0:*    users:(("sshd",pid=686,fd=6))           
+tcp   LISTEN 0      4096                                   *:3000            *:*    users:(("grafana",pid=636,fd=18))       
+tcp   LISTEN 0      4096                                   *:9090            *:*    users:(("prometheus",pid=597,fd=6))     
+tcp   LISTEN 0      4096                                   *:9093            *:*    users:(("prometheus-aler",pid=577,fd=3))
+tcp   LISTEN 0      4096                                   *:9100            *:*    users:(("prometheus-node",pid=581,fd=3))
+tcp   LISTEN 0      128                                 [::]:22           [::]:*    users:(("sshd",pid=686,fd=7))           
