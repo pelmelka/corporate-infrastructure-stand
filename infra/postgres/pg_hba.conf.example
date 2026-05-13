@@ -1,0 +1,3 @@
+# PostgreSQL client authentication rule for application access
+# Actual password value is not stored in repository.
+host    supportdesk    supportdesk_user    192.168.85.133/32    scram-sha-256
