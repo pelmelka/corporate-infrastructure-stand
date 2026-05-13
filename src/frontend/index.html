@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>MISIS_Digital Student Support</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #1f2933;
+        }
+
+        header {
+            background: #111827;
+            color: white;
+            padding: 24px 40px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 32px;
+        }
+
+        header p {
+            margin: 8px 0 0;
+            color: #cbd5e1;
+        }
+
+        main {
+            max-width: 1150px;
+            margin: 28px auto;
+            padding: 0 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 24px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 22px;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            font-size: 22px;
+        }
+
+        label {
+            display: block;
+            margin-top: 14px;
+            font-weight: bold;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 6px;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+
+        textarea {
+            min-height: 95px;
+        }
+
+        button {
+            margin-top: 16px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        .secondary {
+            background: #475569;
+            margin-left: 8px;
+        }
+
+        .secondary:hover {
+            background: #334155;
+        }
+
+        .danger {
+            background: #dc2626;
+        }
+
+        .danger:hover {
+            background: #b91c1c;
+        }
+
+        .full-width {
+            margin-top: 24px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            background: #e2e8f0;
+            color: #1f2933;
+            margin-top: 0;
+        }
+
+        .tab.active {
+            background: #2563eb;
+            color: white;
+        }
+
+        .ticket {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 12px;
+            background: #f8fafc;
+        }
+
+        .ticket-title {
+            font-weight: bold;
+            font-size: 17px;
+        }
+
+        .description {
+            margin-top: 8px;
+        }
+
+        .meta {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #64748b;
+            line-height: 1.6;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: bold;
+            margin-right: 6px;
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .priority {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .category {
+            background: #ede9fe;
+            color: #5b21b6;
+        }
+
+        .resource {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .health-ok {
+            color: #15803d;
+            font-weight: bold;
+        }
+
+        .health-bad {
+            color: #b91c1c;
+            font-weight: bold;
+        }
+
+        pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 10px;
+            padding: 14px;
+            overflow-x: auto;
+        }
+
+        .hint {
+            color: #64748b;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+
+        @media (max-width: 850px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            header {
+                padding: 22px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<header>
+    <h1>MISIS_Digital Student Support</h1>
+    <p>Support portal for MISIS digital student services: LMS, personal account, dormitory portal, events, library, career and payments.</p>
+</header>
+
+<main>
+    <div class="grid">
+        <section class="card">
+            <h2>Backend status</h2>
+            <p id="health">Checking backend...</p>
+            <button onclick="loadHealth()">Refresh health</button>
+            <button class="secondary" onclick="loadTickets(currentFilter)">Refresh tickets</button>
+        </section>
+
+        <section class="card">
+            <h2>Create support request</h2>
+
+            <label for="category">Digital service</label>
+            <select id="category" onchange="onCategoryChange()"></select>
+            <div class="hint">Choose the university digital service where the problem happened.</div>
+
+            <label for="resource">Service section</label>
+            <select id="resource"></select>
+
+            <label for="priority">Priority</label>
+            <select id="priority">
+                <option value="low">low</option>
+                <option value="normal" selected>normal</option>
+                <option value="high">high</option>
+                <option value="critical">critical</option>
+            </select>
+
+            <label for="description">Description</label>
+            <textarea id="description" placeholder="Describe what happened. Example: В расписании отображается неправильная аудитория"></textarea>
+
+            <button onclick="createTicket()">Create ticket</button>
+        </section>
+    </div>
+
+    <section class="card full-width">
+        <h2>Tickets</h2>
+
+        <div class="tabs">
+            <button id="tab-active" class="tab active" onclick="loadTickets('active')">Active</button>
+            <button id="tab-resolved" class="tab" onclick="loadTickets('resolved')">Resolved</button>
+            <button id="tab-all" class="tab" onclick="loadTickets('all')">All</button>
+        </div>
+
+        <div id="summary" class="hint">Loading summary...</div>
+        <div id="tickets">Loading tickets...</div>
+    </section>
+
+    <section class="card full-width">
+        <h2>Last API response</h2>
+        <pre id="api-response">No API response yet.</pre>
+    </section>
+</main>
+
+<script>
+    let supportModel = null;
+    let currentFilter = "active";
+
+    async function loadHealth() {
+        const healthEl = document.getElementById("health");
+
+        try {
+            const response = await fetch("/api/v1/health");
+            const data = await response.json();
+            const backendTime = new Date(data.time);
+
+            healthEl.innerHTML = `
+                <span class="health-ok">OK</span><br>
+                Product: ${escapeHtml(data.product)}<br>
+                Service: ${escapeHtml(data.service)}<br>
+                Version: ${escapeHtml(data.version)}<br>
+                Environment: ${escapeHtml(data.environment)}<br>
+                API version: ${escapeHtml(data.api_version)}<br>
+                Backend time UTC: ${escapeHtml(data.time)}<br>
+                Your local time: ${backendTime.toLocaleString()}
+            `;
+
+            showResponse(data);
+        } catch (error) {
+            healthEl.innerHTML = `<span class="health-bad">Backend unavailable</span>`;
+            showResponse({ error: String(error) });
+        }
+    }
+
+    async function loadSupportModel() {
+        const response = await fetch("/api/v1/support-model");
+        supportModel = await response.json();
+
+        const categorySelect = document.getElementById("category");
+        categorySelect.innerHTML = supportModel.categories.map(category => `
+            <option value="${escapeHtml(category.value)}">${escapeHtml(category.label)}</option>
+        `).join("");
+
+        onCategoryChange();
+    }
+
+    function onCategoryChange() {
+        const categoryValue = document.getElementById("category").value;
+        const resourceSelect = document.getElementById("resource");
+        const category = supportModel.categories.find(item => item.value === categoryValue);
+
+        if (!category) {
+            resourceSelect.innerHTML = "";
+            return;
+        }
+
+        resourceSelect.innerHTML = category.resources.map(resource => `
+            <option value="${escapeHtml(resource.value)}">${escapeHtml(resource.label)}</option>
+        `).join("");
+    }
+
+    async function loadTickets(filter = "active") {
+        currentFilter = filter;
+        setActiveTab(filter);
+
+        const ticketsEl = document.getElementById("tickets");
+        const summaryEl = document.getElementById("summary");
+
+        try {
+            let url = "/api/v1/tickets";
+            if (filter === "resolved") {
+                url = "/api/v1/tickets?status=resolved";
+            } else if (filter === "all") {
+                url = "/api/v1/tickets/all";
+            }
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            summaryEl.innerHTML = `
+                Filter: <b>${escapeHtml(data.filter)}</b> |
+                Active: <b>${data.active_count}</b> |
+                Open: <b>${data.open_count}</b> |
+                In progress: <b>${data.in_progress_count}</b> |
+                Resolved: <b>${data.resolved_count}</b> |
+                Total: <b>${data.total}</b>
+            `;
+
+            if (!data.tickets || data.tickets.length === 0) {
+                ticketsEl.innerHTML = "No tickets in this view.";
+                showResponse(data);
+                return;
+            }
+
+            ticketsEl.innerHTML = data.tickets.map(ticket => renderTicket(ticket)).join("");
+            showResponse(data);
+        } catch (error) {
+            ticketsEl.innerHTML = "Failed to load tickets.";
+            showResponse({ error: String(error) });
+        }
+    }
+
+    function renderTicket(ticket) {
+        const resolvedInfo = ticket.resolved_at
+            ? `<br>Resolved at: ${escapeHtml(ticket.resolved_at)}`
+            : "";
+
+        const actionButtons = ticket.status === "resolved"
+            ? `
+                <button onclick="changeStatus(${ticket.id}, 'open')">Reopen</button>
+              `
+            : `
+                <button onclick="changeStatus(${ticket.id}, 'open')">Open</button>
+                <button onclick="changeStatus(${ticket.id}, 'in_progress')">In progress</button>
+                <button class="danger" onclick="changeStatus(${ticket.id}, 'resolved')">Resolved</button>
+              `;
+
+        return `
+            <div class="ticket">
+                <div class="ticket-title">#${ticket.id} ${escapeHtml(ticket.title)}</div>
+                <div class="description">${escapeHtml(ticket.description || "")}</div>
+
+                <div class="meta">
+                    <span class="pill">${escapeHtml(ticket.status)}</span>
+                    <span class="pill priority">${escapeHtml(ticket.priority)}</span>
+                    <span class="pill category">${escapeHtml(ticket.category_label || ticket.category)}</span>
+                    <span class="pill resource">${escapeHtml(ticket.resource_label || ticket.resource)}</span>
+                    <br>
+                    source=${escapeHtml(ticket.source)}
+                    | category=${escapeHtml(ticket.category)}
+                    | resource=${escapeHtml(ticket.resource)}
+                    <br>
+                    Created at: ${escapeHtml(ticket.created_at)}
+                    <br>
+                    Updated at: ${escapeHtml(ticket.updated_at)}
+                    ${resolvedInfo}
+                </div>
+
+                ${actionButtons}
+            </div>
+        `;
+    }
+
+    async function createTicket() {
+        const category = document.getElementById("category").value;
+        const resource = document.getElementById("resource").value;
+        const priority = document.getElementById("priority").value;
+        const description = document.getElementById("description").value.trim();
+
+        if (!category || !resource) {
+            alert("Choose digital service and service section");
+            return;
+        }
+
+        if (!description) {
+            alert("Description is required");
+            return;
+        }
+
+        const payload = {
+            category: category,
+            resource: resource,
+            priority: priority,
+            description: description,
+            source: "web"
+        };
+
+        const response = await fetch("/api/v1/tickets", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        showResponse(data);
+
+        if (!response.ok) {
+            alert(`Failed to create ticket: ${data.error || response.status}`);
+            return;
+        }
+
+        document.getElementById("description").value = "";
+        await loadTickets("active");
+    }
+
+    async function changeStatus(ticketId, status) {
+        const response = await fetch(`/api/v1/tickets/${ticketId}/status`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                status: status,
+                source: "web"
+            })
+        });
+
+        const data = await response.json();
+        showResponse(data);
+
+        if (!response.ok) {
+            alert(`Failed to change status: ${data.error || response.status}`);
+            return;
+        }
+
+        await loadTickets(currentFilter);
+    }
+
+    function setActiveTab(filter) {
+        for (const value of ["active", "resolved", "all"]) {
+            const tab = document.getElementById(`tab-${value}`);
+            if (tab) {
+                tab.classList.toggle("active", value === filter);
+            }
+        }
+    }
+
+    function showResponse(data) {
+        document.getElementById("api-response").textContent =
+            JSON.stringify(data, null, 2);
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll("\"", "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    async function init() {
+        await loadSupportModel();
+        await loadHealth();
+        await loadTickets("active");
+    }
+
+    init();
+</script>
+</body>
+</html>
