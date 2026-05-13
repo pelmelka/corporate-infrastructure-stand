@@ -1,0 +1,14 @@
+---
+- name: Apply common baseline to managed nodes
+  hosts: managed
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  roles:
+    - common
+    - node_exporter

@@ -1,0 +1,13 @@
+---
+- name: Check app Docker Compose project
+  hosts: app_nodes
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  roles:
+    - app_compose_project

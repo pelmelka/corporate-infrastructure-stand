@@ -1,0 +1,13 @@
+---
+- name: Deploy Nginx frontend and reverse proxy
+  hosts: web_nodes
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  roles:
+    - nginx_frontend

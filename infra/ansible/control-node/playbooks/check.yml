@@ -1,0 +1,196 @@
+---
+- name: Check web node
+  hosts: web_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check expected web systemd services
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop: "{{ web_expected_services }}"
+      changed_when: false
+
+    - name: Check frontend local endpoint
+      ansible.builtin.uri:
+        url: "{{ nginx_health_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+    - name: Check reverse proxy API health endpoint from web
+      ansible.builtin.uri:
+        url: "{{ nginx_api_health_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+
+- name: Check app node
+  hosts: app_nodes
+  gather_facts: false
+  become: true
+
+  vars_prompt:
+    - name: ansible_become_password
+      prompt: "BECOME password"
+      private: true
+
+  tasks:
+    - name: Check expected app systemd services
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop: "{{ app_expected_services }}"
+      changed_when: false
+
+    - name: Check supportdesk-api container is running
+      ansible.builtin.command: "docker compose ps --status running {{ supportdesk_api.compose_service_name }}"
+      args:
+        chdir: "{{ compose_project_dir }}"
+      changed_when: false
+
+    - name: Check support-bot container is running
+      ansible.builtin.command: "docker compose ps --status running {{ support_bot.compose_service_name }}"
+      args:
+        chdir: "{{ compose_project_dir }}"
+      changed_when: false
+
+    - name: Check supportdesk-api health endpoint
+      ansible.builtin.uri:
+        url: "{{ supportdesk_api.healthcheck_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+    - name: Check supportdesk-api metrics endpoint
+      ansible.builtin.uri:
+        url: "{{ supportdesk_api.metrics_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+    - name: Check support-bot metrics endpoint
+      ansible.builtin.uri:
+        url: "{{ support_bot.metrics_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+
+- name: Check log node
+  hosts: log_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check expected log systemd services
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop: "{{ log_expected_services }}"
+      changed_when: false
+
+    - name: Check Loki ready endpoint
+      ansible.builtin.uri:
+        url: "{{ loki_ready_url }}"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: loki_ready
+
+    - name: Assert Loki is ready
+      ansible.builtin.assert:
+        that:
+          - "'ready' in loki_ready.content"
+
+
+- name: Check monitor node
+  hosts: monitor_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check expected monitor systemd services
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop: "{{ monitor_expected_services }}"
+      changed_when: false
+
+    - name: Check Prometheus readiness
+      ansible.builtin.uri:
+        url: "{{ prometheus_ready_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+    - name: Check Alertmanager readiness
+      ansible.builtin.uri:
+        url: "{{ alertmanager_ready_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+    - name: Check Grafana HTTP endpoint
+      ansible.builtin.uri:
+        url: "{{ grafana_url }}"
+        method: GET
+        status_code:
+          - 200
+          - 302
+        return_content: false
+
+    - name: Check Prometheus targets API
+      ansible.builtin.uri:
+        url: "{{ prometheus_targets_url }}"
+        method: GET
+        status_code: 200
+        return_content: true
+      register: prometheus_targets
+
+    - name: Assert expected Prometheus jobs are present
+      ansible.builtin.assert:
+        that:
+          - "item in prometheus_targets.content"
+      loop: "{{ prometheus_expected_jobs }}"
+
+
+- name: Check db node
+  hosts: db_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check expected db systemd services
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop: "{{ db_expected_services }}"
+      changed_when: false
+
+    - name: Check PostgreSQL cluster status
+      ansible.builtin.command: "pg_lsclusters --no-header"
+      changed_when: false
+      register: pg_clusters
+      failed_when: >
+        postgres_cluster_version ~ ' ' ~ postgres_cluster_name not in pg_clusters.stdout
+        or 'online' not in pg_clusters.stdout
+
+    - name: Check postgres_exporter metrics endpoint
+      ansible.builtin.uri:
+        url: "{{ postgres_exporter_metrics_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+    - name: Check backup timer is active
+      ansible.builtin.command: "systemctl is-active {{ backup_timer_name }}"
+      changed_when: false
+
+
+- name: Check end-to-end access from control node
+  hosts: control
+  gather_facts: false
+
+  tasks:
+    - name: Check public web endpoint from admin
+      ansible.builtin.uri:
+        url: "{{ public_web_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+
+    - name: Check public API health endpoint through web from admin
+      ansible.builtin.uri:
+        url: "{{ public_api_health_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
