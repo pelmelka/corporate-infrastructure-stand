@@ -1,6 +1,0 @@
-backups/
-*.bak*
-__pycache__/
-*.pyc
-.env
-.env.bot

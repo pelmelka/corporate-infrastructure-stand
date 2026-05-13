@@ -1,3 +1,0 @@
-python-telegram-bot==22.7
-httpx
-prometheus_client

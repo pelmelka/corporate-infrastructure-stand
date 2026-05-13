@@ -1,8 +1,0 @@
----
-promtail_config_src: "{{ playbook_dir }}/../files/promtail/{{ node_role }}-promtail.yml"
-
-promtail_config_owner: "root"
-promtail_config_group: "promtail"
-promtail_config_mode: "0640"
-
-promtail_metrics_url: "http://localhost:{{ promtail_metrics_port }}/metrics"

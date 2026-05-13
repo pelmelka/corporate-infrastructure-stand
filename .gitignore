@@ -1,0 +1,8 @@
+.env
+.env.*
+*.dump
+*.sha256
+*.bak
+__pycache__/
+*.pyc
+.DS_Store
