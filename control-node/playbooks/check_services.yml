@@ -96,7 +96,7 @@
       register: pg_clusters
       failed_when: >
         pg_clusters.stdout_lines
-        | select('match', '^17\s+main\s+5432\s+online\b')
+        | select('match', '^17\\s+main\\s+5432\\s+online\\b')
         | list
         | length == 0
 

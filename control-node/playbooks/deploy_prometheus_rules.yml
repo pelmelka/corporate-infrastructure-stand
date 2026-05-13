@@ -35,7 +35,12 @@
       ansible.builtin.uri:
         url: http://localhost:9090/-/ready
         method: GET
-        status_code: 200
+        status_code: [200, 503]
+      register: prometheus_ready
+      retries: 10
+      delay: 3
+      until: prometheus_ready.status == 200
+      failed_when: prometheus_ready.status != 200
 
   handlers:
     - name: Restart prometheus

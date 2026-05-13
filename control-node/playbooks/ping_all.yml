@@ -6,3 +6,4 @@
   tasks:
     - name: Check Ansible connection
       ansible.builtin.ping:
+
