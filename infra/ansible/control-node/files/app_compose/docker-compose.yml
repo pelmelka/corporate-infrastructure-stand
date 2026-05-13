@@ -1,0 +1,40 @@
+services:
+  supportdesk-api:
+    build:
+      context: .
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+    image: misis-digital-student-support-api:local
+    container_name: misis-digital-student-support-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/log/app:/var/log/app
+    env_file:
+      - .env
+    environment:
+      TZ: UTC
+
+  support-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+    image: misis-digital-support-bot:local
+    container_name: misis-digital-support-bot
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+    env_file:
+      - .env.bot
+    volumes:
+      - /var/log/bot:/var/log/bot
+    environment:
+      TZ: UTC
+      METRICS_PORT: 8090
+    depends_on:
+      - supportdesk-api

@@ -1,0 +1,27 @@
+---
+- name: Install common packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+
+- name: Ensure common managed directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ common_managed_directories }}"
+
+- name: Check become works
+  ansible.builtin.command: whoami
+  changed_when: false
+  register: common_whoami
+
+- name: Assert become user is root
+  ansible.builtin.assert:
+    that:
+      - common_whoami.stdout == "root"
+    fail_msg: "Privilege escalation is not working correctly."
+    success_msg: "Privilege escalation works correctly."

@@ -1,0 +1,11 @@
+---
+compose_service_file_owner: "root"
+compose_service_file_group: "root"
+compose_service_file_mode: "0644"
+
+compose_env_file_owner: "root"
+compose_env_file_group: "root"
+compose_env_file_mode: "0600"
+
+compose_service_rebuild_command: "docker compose up -d --build {{ compose_service_name }}"
+compose_service_ps_command: "docker compose ps --status running {{ compose_service_name }}"

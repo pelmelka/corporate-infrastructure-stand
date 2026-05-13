@@ -1,0 +1,5 @@
+---
+- name: Rebuild compose service
+  ansible.builtin.command: "{{ compose_service_rebuild_command }}"
+  args:
+    chdir: "{{ compose_project_dir }}"

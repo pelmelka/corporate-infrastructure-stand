@@ -1,0 +1,24 @@
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+RUN groupadd --gid ${APP_GID} botuser \
+    && useradd --uid ${APP_UID} --gid ${APP_GID} --home-dir /opt/app --shell /usr/sbin/nologin botuser
+
+WORKDIR /opt/app
+
+COPY requirements-bot.txt /opt/app/requirements-bot.txt
+RUN pip install --no-cache-dir -r /opt/app/requirements-bot.txt
+
+COPY bot.py /opt/app/bot.py
+
+RUN mkdir -p /var/log/bot \
+    && chown -R botuser:botuser /opt/app /var/log/bot
+
+USER botuser
+
+CMD ["python", "/opt/app/bot.py"]

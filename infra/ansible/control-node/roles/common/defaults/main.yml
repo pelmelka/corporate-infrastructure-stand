@@ -1,0 +1,14 @@
+---
+common_packages:
+  - curl
+  - ca-certificates
+  - gnupg
+  - vim
+  - htop
+  - netcat-openbsd
+
+common_managed_directories:
+  - path: "/opt"
+    owner: "root"
+    group: "root"
+    mode: "0755"

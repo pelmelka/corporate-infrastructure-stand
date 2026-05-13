@@ -1,0 +1,11 @@
+[Unit]
+Description=Create PostgreSQL backup for supportdesk database
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+WorkingDirectory=/
+ExecStart=/usr/local/sbin/backup_supportdesk.sh

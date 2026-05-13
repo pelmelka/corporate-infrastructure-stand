@@ -1,0 +1,123 @@
+---
+- name: Assert required postgres_backup variables are defined
+  ansible.builtin.assert:
+    that:
+      - backup_script_path is defined
+      - backup_dir is defined
+      - backup_latest_dump_path is defined
+      - backup_service_name is defined
+      - backup_timer_name is defined
+    fail_msg: "Required postgres_backup variables are missing."
+
+- name: Check backup script source exists on control node
+  ansible.builtin.stat:
+    path: "{{ postgres_backup_script_src }}"
+  delegate_to: localhost
+  register: postgres_backup_script_src_stat
+
+- name: Fail if backup script source is missing
+  ansible.builtin.fail:
+    msg: "{{ postgres_backup_script_src }} is missing on control node."
+  when: not postgres_backup_script_src_stat.stat.exists
+
+- name: Check backup service source exists on control node
+  ansible.builtin.stat:
+    path: "{{ postgres_backup_service_src }}"
+  delegate_to: localhost
+  register: postgres_backup_service_src_stat
+
+- name: Fail if backup service source is missing
+  ansible.builtin.fail:
+    msg: "{{ postgres_backup_service_src }} is missing on control node."
+  when: not postgres_backup_service_src_stat.stat.exists
+
+- name: Check backup timer source exists on control node
+  ansible.builtin.stat:
+    path: "{{ postgres_backup_timer_src }}"
+  delegate_to: localhost
+  register: postgres_backup_timer_src_stat
+
+- name: Fail if backup timer source is missing
+  ansible.builtin.fail:
+    msg: "{{ postgres_backup_timer_src }} is missing on control node."
+  when: not postgres_backup_timer_src_stat.stat.exists
+
+- name: Ensure PostgreSQL backup directory exists
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    owner: "{{ postgres_backup_dir_owner }}"
+    group: "{{ postgres_backup_dir_group }}"
+    mode: "{{ postgres_backup_dir_mode }}"
+
+- name: Deploy PostgreSQL backup script
+  ansible.builtin.copy:
+    src: "{{ postgres_backup_script_src }}"
+    dest: "{{ backup_script_path }}"
+    owner: "{{ postgres_backup_script_owner }}"
+    group: "{{ postgres_backup_script_group }}"
+    mode: "{{ postgres_backup_script_mode }}"
+    backup: true
+
+- name: Deploy PostgreSQL backup systemd service
+  ansible.builtin.copy:
+    src: "{{ postgres_backup_service_src }}"
+    dest: "/etc/systemd/system/{{ backup_service_name }}"
+    owner: "{{ postgres_backup_unit_owner }}"
+    group: "{{ postgres_backup_unit_group }}"
+    mode: "{{ postgres_backup_unit_mode }}"
+    backup: true
+  notify: Reload systemd
+
+- name: Deploy PostgreSQL backup systemd timer
+  ansible.builtin.copy:
+    src: "{{ postgres_backup_timer_src }}"
+    dest: "/etc/systemd/system/{{ backup_timer_name }}"
+    owner: "{{ postgres_backup_unit_owner }}"
+    group: "{{ postgres_backup_unit_group }}"
+    mode: "{{ postgres_backup_unit_mode }}"
+    backup: true
+  notify: Reload systemd
+
+- name: Run pending systemd handlers before timer checks
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure PostgreSQL backup timer is enabled and running
+  ansible.builtin.systemd_service:
+    name: "{{ backup_timer_name }}"
+    enabled: true
+    state: started
+
+- name: Check PostgreSQL backup timer is active
+  ansible.builtin.command: "systemctl is-active {{ backup_timer_name }}"
+  changed_when: false
+
+- name: Check latest PostgreSQL backup dump status
+  ansible.builtin.stat:
+    path: "{{ backup_latest_dump_path }}"
+    follow: true
+  register: postgres_backup_latest_dump
+
+- name: Show latest PostgreSQL backup dump status
+  ansible.builtin.debug:
+    msg: >-
+      latest.dump exists={{ postgres_backup_latest_dump.stat.exists | default(false) }},
+      size={{ postgres_backup_latest_dump.stat.size | default(0) }} bytes.
+      Run playbooks/run_db_backup.yml to create or refresh it.
+
+- name: Assert latest PostgreSQL backup dump exists when required
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_latest_dump.stat.exists
+      - postgres_backup_latest_dump.stat.size | int > 0
+    fail_msg: "{{ backup_latest_dump_path }} is missing or empty."
+  when: postgres_backup_require_latest_dump | bool
+
+- name: Show PostgreSQL backup timer status
+  ansible.builtin.command: "systemctl list-timers {{ backup_timer_name }} --no-pager"
+  changed_when: false
+  register: postgres_backup_timer_status
+
+- name: Print PostgreSQL backup timer status
+  ansible.builtin.debug:
+    var: postgres_backup_timer_status.stdout_lines

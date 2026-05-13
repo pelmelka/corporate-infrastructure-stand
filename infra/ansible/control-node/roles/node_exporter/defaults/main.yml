@@ -1,0 +1,4 @@
+---
+node_exporter_package_name: "prometheus-node-exporter"
+node_exporter_service: "{{ node_exporter_service_name }}"
+node_exporter_metrics_url: "http://localhost:{{ node_exporter_port }}/metrics"

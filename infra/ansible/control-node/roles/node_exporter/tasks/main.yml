@@ -1,0 +1,23 @@
+---
+- name: Install node_exporter package
+  ansible.builtin.apt:
+    name: "{{ node_exporter_package_name }}"
+    state: present
+    update_cache: true
+
+- name: Ensure node_exporter is enabled and running
+  ansible.builtin.systemd_service:
+    name: "{{ node_exporter_service }}"
+    enabled: true
+    state: started
+
+- name: Check node_exporter service is active
+  ansible.builtin.command: "systemctl is-active {{ node_exporter_service }}"
+  changed_when: false
+
+- name: Check node_exporter metrics endpoint
+  ansible.builtin.uri:
+    url: "{{ node_exporter_metrics_url }}"
+    method: GET
+    status_code: 200
+    return_content: false
